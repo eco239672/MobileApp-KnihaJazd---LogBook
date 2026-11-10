@@ -257,6 +257,46 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     }
   }
 
+  Future<int> _vlozitUkazkoveJazdy() async {
+    final dnes = DateTime.now();
+    final prvyDenMesiaca = DateTime(dnes.year, dnes.month);
+    final trasy = [
+      (odkial: 'Nové Zámky', kam: 'Komárno', kilometre: 41.8),
+      (odkial: 'Nové Zámky', kam: 'Nitra', kilometre: 69.4),
+      (odkial: 'Nové Zámky', kam: 'Šaľa', kilometre: 34.6),
+      (odkial: 'Nové Zámky', kam: 'Levice', kilometre: 54.2),
+      (odkial: 'Nové Zámky', kam: 'Kolárovo', kilometre: 37.1),
+    ];
+    final noveJazdy = <Jazda>[];
+
+    for (
+      var datum = prvyDenMesiaca;
+      !datum.isAfter(dnes);
+      datum = datum.add(const Duration(days: 1))
+    ) {
+      if (_jazdy.any((jazda) => jeRovnakyDen(jazda.datum, datum))) continue;
+      final trasa = trasy[(datum.day - 1) % trasy.length];
+      final zaciatokHodina = 7 + (datum.day % 3);
+      final jazda = Jazda(
+        datum: datum,
+        odkial: trasa.odkial,
+        kam: trasa.kam,
+        zaciatok: '${zaciatokHodina.toString().padLeft(2, '0')}:15',
+        koniec: '${(zaciatokHodina + 1).toString().padLeft(2, '0')}:05',
+        kilometre: trasa.kilometre,
+        typ: datum.weekday <= DateTime.friday
+            ? TypJazdy.sluzobna
+            : TypJazdy.sukromna,
+      );
+      noveJazdy.add(await _ulozisko.ulozitJazdu(jazda));
+    }
+
+    if (!mounted) return 0;
+    setState(() => _jazdy.addAll(noveJazdy));
+    await _synchronizovatNaPozadi();
+    return noveJazdy.length;
+  }
+
   Future<void> _otvoritKalendar() async {
     final aktualnyRok = DateTime.now().year;
     final vybranyDatum = await showDatePicker(
@@ -351,6 +391,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
                 onSynchronizovat: () =>
                     _synchronizovatDoCloudu(zobrazitVysledok: true),
                 onOdhlasitZCloudu: _odhlasitZCloudu,
+                onVlozitUkazkoveJazdy: kDebugMode ? _vlozitUkazkoveJazdy : null,
               )
             : _vybranaZalozka == 1
             ? const _PrehladPlaceholder()

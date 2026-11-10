@@ -16,6 +16,7 @@ class NastaveniaVozidlaPage extends StatefulWidget {
     required this.onPrihlasitACSynchronizovat,
     required this.onSynchronizovat,
     required this.onOdhlasitZCloudu,
+    this.onVlozitUkazkoveJazdy,
     super.key,
   });
 
@@ -28,6 +29,7 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   final Future<void> Function() onPrihlasitACSynchronizovat;
   final Future<void> Function() onSynchronizovat;
   final Future<void> Function() onOdhlasitZCloudu;
+  final Future<int> Function()? onVlozitUkazkoveJazdy;
 
   @override
   State<NastaveniaVozidlaPage> createState() => _NastaveniaVozidlaPageState();
@@ -42,6 +44,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
   StavRozpoznavaniaAktivity? _stavRozpoznavania;
   var _meniSaRozpoznavanie = false;
   var _pracujeSCloudom = false;
+  var _vytvaraUkazkoveJazdy = false;
 
   @override
   void initState() {
@@ -129,6 +132,26 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
       );
     } finally {
       if (mounted) setState(() => _pracujeSCloudom = false);
+    }
+  }
+
+  Future<void> _vlozitUkazkoveJazdy() async {
+    final akcia = widget.onVlozitUkazkoveJazdy;
+    if (akcia == null) return;
+    setState(() => _vytvaraUkazkoveJazdy = true);
+    try {
+      final pocet = await akcia();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Pridaných ukážkových jázd: $pocet.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ukážkové jazdy sa nepodarilo vytvoriť.')),
+      );
+    } finally {
+      if (mounted) setState(() => _vytvaraUkazkoveJazdy = false);
     }
   }
 
@@ -253,6 +276,28 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
             ),
           ),
         ),
+        if (widget.onVlozitUkazkoveJazdy != null) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.science_outlined),
+              title: const Text('Ukážkové jazdy'),
+              subtitle: const Text(
+                'Vytvorí testovacie jazdy od prvého dňa aktuálneho mesiaca.',
+              ),
+              trailing: FilledButton(
+                onPressed: _vytvaraUkazkoveJazdy ? null : _vlozitUkazkoveJazdy,
+                child: _vytvaraUkazkoveJazdy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Vytvoriť'),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Card(
           child: Padding(
