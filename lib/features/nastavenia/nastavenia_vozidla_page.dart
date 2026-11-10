@@ -143,12 +143,12 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
       final pocet = await akcia();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Pridaných ukážkových jázd: $pocet.')),
+        SnackBar(content: Text('Nahradených ukážkových jázd: $pocet.')),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ukážkové jazdy sa nepodarilo vytvoriť.')),
+        const SnackBar(content: Text('Ukážkové jazdy sa nepodarilo nahradiť.')),
       );
     } finally {
       if (mounted) setState(() => _vytvaraUkazkoveJazdy = false);
@@ -283,7 +283,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
               leading: const Icon(Icons.science_outlined),
               title: const Text('Ukážkové jazdy'),
               subtitle: const Text(
-                'Vytvorí testovacie jazdy od prvého dňa aktuálneho mesiaca.',
+                'Nahradí testovacie jazdy pármi tam aj späť zo Šale.',
               ),
               trailing: FilledButton(
                 onPressed: _vytvaraUkazkoveJazdy ? null : _vlozitUkazkoveJazdy,
@@ -293,7 +293,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Vytvoriť'),
+                    : const Text('Nahradiť'),
               ),
             ),
           ),

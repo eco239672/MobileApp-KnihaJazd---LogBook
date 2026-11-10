@@ -257,16 +257,28 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     }
   }
 
-  Future<int> _vlozitUkazkoveJazdy() async {
+  Future<int> _nahraditUkazkoveJazdy() async {
     final dnes = DateTime.now();
     final prvyDenMesiaca = DateTime(dnes.year, dnes.month);
     final trasy = [
-      (odkial: 'Nové Zámky', kam: 'Komárno', kilometre: 41.8),
-      (odkial: 'Nové Zámky', kam: 'Nitra', kilometre: 69.4),
-      (odkial: 'Nové Zámky', kam: 'Šaľa', kilometre: 34.6),
-      (odkial: 'Nové Zámky', kam: 'Levice', kilometre: 54.2),
-      (odkial: 'Nové Zámky', kam: 'Kolárovo', kilometre: 37.1),
+      (ciel: 'Nové Zámky', kilometre: 18.2),
+      (ciel: 'Nitra', kilometre: 43.7),
+      (ciel: 'Komárno', kilometre: 40.5),
+      (ciel: 'Levice', kilometre: 45.9),
+      (ciel: 'Kolárovo', kilometre: 29.1),
     ];
+    final povodneJazdy = _jazdy
+        .where(
+          (jazda) =>
+              !jazda.datum.isBefore(prvyDenMesiaca) &&
+              !jazda.datum.isAfter(dnes),
+        )
+        .toList();
+    if (_cloudovaSynchronizacia?.aktualnyUcet != null) {
+      await _cloud.vymazatJazdy(povodneJazdy);
+    }
+    await _ulozisko.vymazatJazdy(povodneJazdy);
+
     final noveJazdy = <Jazda>[];
 
     for (
@@ -274,25 +286,44 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
       !datum.isAfter(dnes);
       datum = datum.add(const Duration(days: 1))
     ) {
-      if (_jazdy.any((jazda) => jeRovnakyDen(jazda.datum, datum))) continue;
       final trasa = trasy[(datum.day - 1) % trasy.length];
       final zaciatokHodina = 7 + (datum.day % 3);
-      final jazda = Jazda(
+      final typ = datum.weekday <= DateTime.friday
+          ? TypJazdy.sluzobna
+          : TypJazdy.sukromna;
+      final tam = Jazda(
         datum: datum,
-        odkial: trasa.odkial,
-        kam: trasa.kam,
+        odkial: 'Šaľa',
+        kam: trasa.ciel,
         zaciatok: '${zaciatokHodina.toString().padLeft(2, '0')}:15',
-        koniec: '${(zaciatokHodina + 1).toString().padLeft(2, '0')}:05',
+        koniec: '${(zaciatokHodina + 1).toString().padLeft(2, '0')}:00',
         kilometre: trasa.kilometre,
-        typ: datum.weekday <= DateTime.friday
-            ? TypJazdy.sluzobna
-            : TypJazdy.sukromna,
+        typ: typ,
       );
-      noveJazdy.add(await _ulozisko.ulozitJazdu(jazda));
+      final spat = Jazda(
+        datum: datum,
+        odkial: trasa.ciel,
+        kam: 'Šaľa',
+        zaciatok: '16:15',
+        koniec: '${(17 + datum.day % 2).toString().padLeft(2, '0')}:00',
+        kilometre: trasa.kilometre,
+        typ: typ,
+      );
+      noveJazdy
+        ..add(await _ulozisko.ulozitJazdu(tam))
+        ..add(await _ulozisko.ulozitJazdu(spat));
     }
 
     if (!mounted) return 0;
-    setState(() => _jazdy.addAll(noveJazdy));
+    setState(() {
+      _jazdy
+        ..removeWhere(
+          (jazda) =>
+              !jazda.datum.isBefore(prvyDenMesiaca) &&
+              !jazda.datum.isAfter(dnes),
+        )
+        ..addAll(noveJazdy);
+    });
     await _synchronizovatNaPozadi();
     return noveJazdy.length;
   }
@@ -391,7 +422,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
                 onSynchronizovat: () =>
                     _synchronizovatDoCloudu(zobrazitVysledok: true),
                 onOdhlasitZCloudu: _odhlasitZCloudu,
-                onVlozitUkazkoveJazdy: kDebugMode ? _vlozitUkazkoveJazdy : null,
+                onVlozitUkazkoveJazdy: kDebugMode
+                    ? _nahraditUkazkoveJazdy
+                    : null,
               )
             : _vybranaZalozka == 1
             ? const _PrehladPlaceholder()

@@ -9,6 +9,7 @@ import '../models/nastavenia_vozidla.dart';
 abstract interface class LokalneUlozisko {
   Future<UlozeneUdaje> nacitat();
   Future<Jazda> ulozitJazdu(Jazda jazda);
+  Future<void> vymazatJazdy(Iterable<Jazda> jazdy);
   Future<void> ulozitNastavenia(NastaveniaVozidla nastavenia);
   Future<void> zavriet();
 }
@@ -125,6 +126,18 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
   }
 
   @override
+  Future<void> vymazatJazdy(Iterable<Jazda> jazdy) async {
+    final ids = jazdy.map((jazda) => jazda.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+    final db = await _db;
+    await db.transaction((transakcia) async {
+      for (final id in ids) {
+        await transakcia.delete('jazdy', where: 'id = ?', whereArgs: [id]);
+      }
+    });
+  }
+
+  @override
   Future<void> ulozitNastavenia(NastaveniaVozidla nastavenia) async {
     final db = await _db;
     await db.insert('nastavenia_vozidla', {
@@ -204,6 +217,12 @@ class PamatoveLokalneUlozisko implements LokalneUlozisko {
       _jazdy[index] = ulozena;
     }
     return ulozena;
+  }
+
+  @override
+  Future<void> vymazatJazdy(Iterable<Jazda> jazdy) async {
+    final ids = jazdy.map((jazda) => jazda.id).whereType<int>().toSet();
+    _jazdy.removeWhere((jazda) => ids.contains(jazda.id));
   }
 
   @override

@@ -65,6 +65,23 @@ class CloudovaSynchronizacia {
     ]);
   }
 
+  Future<void> vymazatJazdy(Iterable<Jazda> jazdy) async {
+    final user = _autentifikacia.currentUser;
+    if (user == null) {
+      throw StateError('Pred úpravou cloudových dát sa treba prihlásiť.');
+    }
+    final davka = _firestore.batch();
+    final kolekcia = _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('jazdy');
+    for (final jazda in jazdy) {
+      final cloudId = jazda.cloudId;
+      if (cloudId != null) davka.delete(kolekcia.doc(cloudId));
+    }
+    await davka.commit();
+  }
+
   /// Stiahne chýbajúce jazdy a potom odošle miestne dáta do súkromnej vetvy
   /// prihláseného používateľa. Firestore môže požiadavky pri strate signálu
   /// zaradiť do svojej lokálnej fronty.

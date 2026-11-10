@@ -66,4 +66,36 @@ void main() {
       expect(nacitane.nastavenia.cenaNafty, 1.48);
     },
   );
+
+  test('vymaže iba zvolenú jazdu', () async {
+    final ulozisko = PamatoveLokalneUlozisko();
+    final prva = await ulozisko.ulozitJazdu(
+      Jazda(
+        datum: DateTime(2026, 11, 1),
+        odkial: 'Šaľa',
+        kam: 'Nitra',
+        zaciatok: '08:00',
+        koniec: '09:00',
+        kilometre: 43.7,
+        typ: TypJazdy.sluzobna,
+      ),
+    );
+    await ulozisko.ulozitJazdu(
+      Jazda(
+        datum: DateTime(2026, 11, 2),
+        odkial: 'Nitra',
+        kam: 'Šaľa',
+        zaciatok: '16:00',
+        koniec: '17:00',
+        kilometre: 43.7,
+        typ: TypJazdy.sluzobna,
+      ),
+    );
+
+    await ulozisko.vymazatJazdy([prva]);
+
+    final nacitane = await ulozisko.nacitat();
+    expect(nacitane.jazdy, hasLength(1));
+    expect(nacitane.jazdy.single.odkial, 'Nitra');
+  });
 }
