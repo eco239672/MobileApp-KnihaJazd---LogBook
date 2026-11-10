@@ -28,7 +28,8 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
   final _formular = GlobalKey<FormState>();
   late final TextEditingController _spz;
   late final TextEditingController _spotreba;
-  late final TextEditingController _cenaPaliva;
+  late final TextEditingController _cenaBenzinu;
+  late final TextEditingController _cenaNafty;
   StavRozpoznavaniaAktivity? _stavRozpoznavania;
   var _meniSaRozpoznavanie = false;
 
@@ -39,8 +40,11 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
     _spotreba = TextEditingController(
       text: widget.nastavenia.priemernaSpotreba?.toString(),
     );
-    _cenaPaliva = TextEditingController(
-      text: widget.nastavenia.cenaPaliva?.toString(),
+    _cenaBenzinu = TextEditingController(
+      text: widget.nastavenia.cenaBenzinu?.toString(),
+    );
+    _cenaNafty = TextEditingController(
+      text: widget.nastavenia.cenaNafty?.toString(),
     );
     _nacitatStavRozpoznavania();
   }
@@ -49,7 +53,8 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
   void dispose() {
     _spz.dispose();
     _spotreba.dispose();
-    _cenaPaliva.dispose();
+    _cenaBenzinu.dispose();
+    _cenaNafty.dispose();
     super.dispose();
   }
 
@@ -62,7 +67,8 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
         NastaveniaVozidla(
           spz: _spz.text.trim().toUpperCase(),
           priemernaSpotreba: _cislo(_spotreba.text),
-          cenaPaliva: _cislo(_cenaPaliva.text),
+          cenaBenzinu: _cislo(_cenaBenzinu.text),
+          cenaNafty: _cislo(_cenaNafty.text),
         ),
       );
       if (!mounted) return;
@@ -169,18 +175,32 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
-                    controller: _cenaPaliva,
+                    controller: _cenaBenzinu,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
                     inputFormatters: [decimalnyVstup],
                     decoration: const InputDecoration(
-                      labelText: 'Cena paliva',
+                      labelText: 'Cena benzínu',
                       suffixText: '€ / l',
                       hintText: 'nepovinné',
                     ),
                     validator: (hodnota) =>
-                        _kladneCislo(hodnota, 'cenu paliva'),
+                        _kladneCislo(hodnota, 'cenu benzínu'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _cenaNafty,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [decimalnyVstup],
+                    decoration: const InputDecoration(
+                      labelText: 'Cena nafty',
+                      suffixText: '€ / l',
+                      hintText: 'nepovinné',
+                    ),
+                    validator: (hodnota) => _kladneCislo(hodnota, 'cenu nafty'),
                   ),
                   const SizedBox(height: 20),
                   Row(

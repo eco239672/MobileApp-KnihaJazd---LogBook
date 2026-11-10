@@ -42,7 +42,8 @@ void main() {
         const NastaveniaVozidla(
           spz: 'NZ123AB',
           priemernaSpotreba: 6.4,
-          cenaPaliva: 1.55,
+          cenaBenzinu: 1.55,
+          cenaNafty: 1.48,
         ),
       );
       await ulozisko.zavriet();
@@ -59,6 +60,8 @@ void main() {
       expect(nacitane.jazdy.single.kilometre, 31.2);
       expect(nacitane.nastavenia.spz, 'NZ123AB');
       expect(nacitane.nastavenia.priemernaSpotreba, 6.4);
+      expect(nacitane.nastavenia.cenaBenzinu, 1.55);
+      expect(nacitane.nastavenia.cenaNafty, 1.48);
     },
   );
 }

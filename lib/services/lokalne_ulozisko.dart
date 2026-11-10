@@ -34,7 +34,7 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
         databazovaCesta ?? path.join(await getDatabasesPath(), _nazovDatabazy);
     final databaza = await openDatabase(
       ciel,
-      version: 1,
+      version: 2,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE jazdy(
@@ -53,9 +53,25 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
             id INTEGER PRIMARY KEY CHECK (id = 1),
             spz TEXT NOT NULL,
             priemerna_spotreba REAL,
-            cena_paliva REAL
+            cena_benzinu REAL,
+            cena_nafty REAL
           )
         ''');
+      },
+      onUpgrade: (db, staraVerzia, _) async {
+        if (staraVerzia < 2) {
+          await db.execute(
+            'ALTER TABLE nastavenia_vozidla ADD COLUMN cena_benzinu REAL',
+          );
+          await db.execute(
+            'ALTER TABLE nastavenia_vozidla ADD COLUMN cena_nafty REAL',
+          );
+          await db.execute('''
+            UPDATE nastavenia_vozidla
+            SET cena_benzinu = cena_paliva, cena_nafty = cena_paliva
+            WHERE cena_paliva IS NOT NULL
+          ''');
+        }
       },
     );
     _databaza = databaza;
@@ -97,7 +113,8 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
       'id': 1,
       'spz': nastavenia.spz,
       'priemerna_spotreba': nastavenia.priemernaSpotreba,
-      'cena_paliva': nastavenia.cenaPaliva,
+      'cena_benzinu': nastavenia.cenaBenzinu,
+      'cena_nafty': nastavenia.cenaNafty,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -132,7 +149,8 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
       NastaveniaVozidla(
         spz: mapa['spz']! as String,
         priemernaSpotreba: (mapa['priemerna_spotreba'] as num?)?.toDouble(),
-        cenaPaliva: (mapa['cena_paliva'] as num?)?.toDouble(),
+        cenaBenzinu: (mapa['cena_benzinu'] as num?)?.toDouble(),
+        cenaNafty: (mapa['cena_nafty'] as num?)?.toDouble(),
       );
 }
 

@@ -2,10 +2,12 @@ class NastaveniaVozidla {
   const NastaveniaVozidla({
     this.spz = '',
     this.priemernaSpotreba,
-    this.cenaPaliva,
+    this.cenaBenzinu,
+    this.cenaNafty,
   });
 
   final String spz;
   final double? priemernaSpotreba;
-  final double? cenaPaliva;
+  final double? cenaBenzinu;
+  final double? cenaNafty;
 }
