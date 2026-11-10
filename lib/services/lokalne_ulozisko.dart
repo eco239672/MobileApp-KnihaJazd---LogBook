@@ -1,0 +1,168 @@
+import 'package:path/path.dart' as path;
+import 'package:sqflite/sqflite.dart';
+
+import '../models/jazda.dart';
+import '../models/nastavenia_vozidla.dart';
+
+abstract interface class LokalneUlozisko {
+  Future<UlozeneUdaje> nacitat();
+  Future<Jazda> ulozitJazdu(Jazda jazda);
+  Future<void> ulozitNastavenia(NastaveniaVozidla nastavenia);
+  Future<void> zavriet();
+}
+
+class UlozeneUdaje {
+  const UlozeneUdaje({required this.jazdy, required this.nastavenia});
+
+  final List<Jazda> jazdy;
+  final NastaveniaVozidla nastavenia;
+}
+
+/// Trvalé úložisko v súbore SQLite v súkromnom priestore aplikácie telefónu.
+class SqliteLokalneUlozisko implements LokalneUlozisko {
+  SqliteLokalneUlozisko({this.databazovaCesta});
+
+  static const _nazovDatabazy = 'kniha_jazd.db';
+  final String? databazovaCesta;
+  Database? _databaza;
+
+  Future<Database> get _db async {
+    final existujuca = _databaza;
+    if (existujuca != null) return existujuca;
+
+    final ciel =
+        databazovaCesta ?? path.join(await getDatabasesPath(), _nazovDatabazy);
+    final databaza = await openDatabase(
+      ciel,
+      version: 1,
+      onCreate: (db, _) async {
+        await db.execute('''
+          CREATE TABLE jazdy(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum TEXT NOT NULL,
+            odkial TEXT NOT NULL,
+            kam TEXT NOT NULL,
+            zaciatok TEXT NOT NULL,
+            koniec TEXT NOT NULL,
+            kilometre REAL NOT NULL,
+            typ TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE nastavenia_vozidla(
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            spz TEXT NOT NULL,
+            priemerna_spotreba REAL,
+            cena_paliva REAL
+          )
+        ''');
+      },
+    );
+    _databaza = databaza;
+    return databaza;
+  }
+
+  @override
+  Future<UlozeneUdaje> nacitat() async {
+    final db = await _db;
+    final vysledky = await Future.wait([
+      db.query('jazdy', orderBy: 'datum DESC, zaciatok ASC'),
+      db.query('nastavenia_vozidla', where: 'id = ?', whereArgs: [1]),
+    ]);
+    final jazdy = vysledky[0].map(_jazdaZMapy).toList();
+    final riadkyNastaveni = vysledky[1];
+    final nastavenia = riadkyNastaveni.isEmpty
+        ? const NastaveniaVozidla()
+        : _nastaveniaZMapy(riadkyNastaveni.single);
+    return UlozeneUdaje(jazdy: jazdy, nastavenia: nastavenia);
+  }
+
+  @override
+  Future<Jazda> ulozitJazdu(Jazda jazda) async {
+    final db = await _db;
+    final hodnoty = _jazdaDoMapy(jazda);
+    final id = jazda.id;
+    if (id == null) {
+      final noveId = await db.insert('jazdy', hodnoty);
+      return jazda.copyWith(id: noveId);
+    }
+    await db.update('jazdy', hodnoty, where: 'id = ?', whereArgs: [id]);
+    return jazda;
+  }
+
+  @override
+  Future<void> ulozitNastavenia(NastaveniaVozidla nastavenia) async {
+    final db = await _db;
+    await db.insert('nastavenia_vozidla', {
+      'id': 1,
+      'spz': nastavenia.spz,
+      'priemerna_spotreba': nastavenia.priemernaSpotreba,
+      'cena_paliva': nastavenia.cenaPaliva,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  @override
+  Future<void> zavriet() async {
+    await _databaza?.close();
+    _databaza = null;
+  }
+
+  Map<String, Object?> _jazdaDoMapy(Jazda jazda) => {
+    'datum': jazda.datum.toIso8601String(),
+    'odkial': jazda.odkial,
+    'kam': jazda.kam,
+    'zaciatok': jazda.zaciatok,
+    'koniec': jazda.koniec,
+    'kilometre': jazda.kilometre,
+    'typ': jazda.typ.name,
+  };
+
+  Jazda _jazdaZMapy(Map<String, Object?> mapa) => Jazda(
+    id: mapa['id'] as int,
+    datum: DateTime.parse(mapa['datum']! as String),
+    odkial: mapa['odkial']! as String,
+    kam: mapa['kam']! as String,
+    zaciatok: mapa['zaciatok']! as String,
+    koniec: mapa['koniec']! as String,
+    kilometre: (mapa['kilometre']! as num).toDouble(),
+    typ: TypJazdy.values.byName(mapa['typ']! as String),
+  );
+
+  NastaveniaVozidla _nastaveniaZMapy(Map<String, Object?> mapa) =>
+      NastaveniaVozidla(
+        spz: mapa['spz']! as String,
+        priemernaSpotreba: (mapa['priemerna_spotreba'] as num?)?.toDouble(),
+        cenaPaliva: (mapa['cena_paliva'] as num?)?.toDouble(),
+      );
+}
+
+/// Jednoduchá implementácia používaná len vo widget testoch.
+class PamatoveLokalneUlozisko implements LokalneUlozisko {
+  final List<Jazda> _jazdy = [];
+  NastaveniaVozidla _nastavenia = const NastaveniaVozidla();
+  var _dalsieId = 1;
+
+  @override
+  Future<UlozeneUdaje> nacitat() async =>
+      UlozeneUdaje(jazdy: List.unmodifiable(_jazdy), nastavenia: _nastavenia);
+
+  @override
+  Future<Jazda> ulozitJazdu(Jazda jazda) async {
+    final ulozena = jazda.id == null ? jazda.copyWith(id: _dalsieId++) : jazda;
+    final index = _jazdy.indexWhere((polozka) => polozka.id == ulozena.id);
+    if (index < 0) {
+      _jazdy.add(ulozena);
+    } else {
+      _jazdy[index] = ulozena;
+    }
+    return ulozena;
+  }
+
+  @override
+  Future<void> ulozitNastavenia(NastaveniaVozidla nastavenia) async {
+    _nastavenia = nastavenia;
+  }
+
+  @override
+  Future<void> zavriet() async {}
+}

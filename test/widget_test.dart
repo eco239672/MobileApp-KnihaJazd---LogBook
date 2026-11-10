@@ -3,13 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kniha_jazd/features/jazdy/detail_dna_page.dart';
 import 'package:kniha_jazd/main.dart';
 import 'package:kniha_jazd/models/jazda.dart';
+import 'package:kniha_jazd/services/lokalne_ulozisko.dart';
 import 'package:kniha_jazd/utils/format_datumu.dart';
 
 void main() {
   testWidgets('zobrazí prázdnu úvodnú obrazovku knihy jázd', (tester) async {
-    await tester.pumpWidget(const KnihaJazdApp());
+    await tester.pumpWidget(KnihaJazdApp(ulozisko: PamatoveLokalneUlozisko()));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Kniha jázd'), findsOneWidget);
+    expect(find.text('Kniha jázd – Drive Log Cloud'), findsOneWidget);
     expect(
       find.text('${nazovMesiaca(DateTime.now().month)} ${DateTime.now().year}'),
       findsOneWidget,
@@ -24,7 +26,7 @@ void main() {
       MaterialApp(
         home: DetailDnaPage(
           datum: '7. november 2026',
-          onJazdaUpravena: (_) {},
+          onJazdaUpravena: (_) async {},
           jazdy: [
             JazdaDna(
               indexVZozname: 0,

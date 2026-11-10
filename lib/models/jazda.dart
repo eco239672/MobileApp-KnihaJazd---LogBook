@@ -9,6 +9,7 @@ enum TypJazdy {
 
 class Jazda {
   const Jazda({
+    this.id,
     required this.datum,
     required this.odkial,
     required this.kam,
@@ -18,6 +19,7 @@ class Jazda {
     required this.typ,
   });
 
+  final int? id;
   final DateTime datum;
   final String odkial;
   final String kam;
@@ -27,6 +29,7 @@ class Jazda {
   final TypJazdy typ;
 
   Jazda copyWith({
+    int? id,
     DateTime? datum,
     String? odkial,
     String? kam,
@@ -36,6 +39,7 @@ class Jazda {
     TypJazdy? typ,
   }) {
     return Jazda(
+      id: id ?? this.id,
       datum: datum ?? this.datum,
       odkial: odkial ?? this.odkial,
       kam: kam ?? this.kam,

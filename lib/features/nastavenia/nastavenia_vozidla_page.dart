@@ -15,12 +15,10 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   });
 
   final NastaveniaVozidla nastavenia;
-  final ValueChanged<NastaveniaVozidla> onUlozit;
+  final Future<void> Function(NastaveniaVozidla) onUlozit;
   final VoidCallback onSpatNaJazdy;
-  final Future<StavRozpoznavaniaAktivity> Function()
-  onPovolitRozpoznavanie;
-  final Future<StavRozpoznavaniaAktivity> Function()
-  onZistitStavRozpoznavania;
+  final Future<StavRozpoznavaniaAktivity> Function() onPovolitRozpoznavanie;
+  final Future<StavRozpoznavaniaAktivity> Function() onZistitStavRozpoznavania;
 
   @override
   State<NastaveniaVozidlaPage> createState() => _NastaveniaVozidlaPageState();
@@ -55,20 +53,28 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
     super.dispose();
   }
 
-  void _ulozit() {
+  Future<void> _ulozit() async {
     if (!_formular.currentState!.validate()) return;
 
     FocusScope.of(context).unfocus();
-    widget.onUlozit(
-      NastaveniaVozidla(
-        spz: _spz.text.trim().toUpperCase(),
-        priemernaSpotreba: _cislo(_spotreba.text),
-        cenaPaliva: _cislo(_cenaPaliva.text),
-      ),
-    );
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Nastavenia vozidla boli uložené.')),
-    );
+    try {
+      await widget.onUlozit(
+        NastaveniaVozidla(
+          spz: _spz.text.trim().toUpperCase(),
+          priemernaSpotreba: _cislo(_spotreba.text),
+          cenaPaliva: _cislo(_cenaPaliva.text),
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nastavenia vozidla boli uložené.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nastavenia sa nepodarilo uložiť.')),
+      );
+    }
   }
 
   Future<void> _nacitatStavRozpoznavania() async {

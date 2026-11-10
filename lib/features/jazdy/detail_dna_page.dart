@@ -14,7 +14,7 @@ class DetailDnaPage extends StatefulWidget {
 
   final String datum;
   final List<JazdaDna> jazdy;
-  final ValueChanged<JazdaDna> onJazdaUpravena;
+  final Future<void> Function(JazdaDna) onJazdaUpravena;
 
   @override
   State<DetailDnaPage> createState() => _DetailDnaPageState();
@@ -36,10 +36,17 @@ class _DetailDnaPageState extends State<DetailDnaPage> {
     );
 
     if (upravenaJazda != null && mounted) {
-      setState(() {
-        _jazdy[index] = _jazdy[index].copyWith(jazda: upravenaJazda);
-      });
-      widget.onJazdaUpravena(_jazdy[index]);
+      final upravenyZaznam = _jazdy[index].copyWith(jazda: upravenaJazda);
+      try {
+        await widget.onJazdaUpravena(upravenyZaznam);
+        if (!mounted) return;
+        setState(() => _jazdy[index] = upravenyZaznam);
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Jazdu sa nepodarilo uložiť.')),
+        );
+      }
     }
   }
 

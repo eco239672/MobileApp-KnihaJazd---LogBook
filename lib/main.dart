@@ -10,6 +10,7 @@ import 'models/jazda.dart';
 import 'models/nastavenia_vozidla.dart';
 import 'models/trasa_bod.dart';
 import 'services/gps_tracking_service.dart';
+import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
 import 'utils/format_datumu.dart';
 
@@ -18,7 +19,9 @@ void main() {
 }
 
 class KnihaJazdApp extends StatelessWidget {
-  const KnihaJazdApp({super.key});
+  const KnihaJazdApp({this.ulozisko, super.key});
+
+  final LokalneUlozisko? ulozisko;
 
   @override
   Widget build(BuildContext context) {
@@ -32,13 +35,15 @@ class KnihaJazdApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0B6E69)),
         useMaterial3: true,
       ),
-      home: const KnihaJazdHomePage(),
+      home: KnihaJazdHomePage(ulozisko: ulozisko),
     );
   }
 }
 
 class KnihaJazdHomePage extends StatefulWidget {
-  const KnihaJazdHomePage({super.key});
+  const KnihaJazdHomePage({this.ulozisko, super.key});
+
+  final LokalneUlozisko? ulozisko;
 
   @override
   State<KnihaJazdHomePage> createState() => _KnihaJazdHomePageState();
@@ -47,6 +52,7 @@ class KnihaJazdHomePage extends StatefulWidget {
 class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   final _gpsTracking = GpsTrackingService();
   final _rozpoznavanieAktivity = RozpoznavanieAktivityService();
+  late final LokalneUlozisko _ulozisko;
   NastaveniaVozidla _nastaveniaVozidla = const NastaveniaVozidla();
   var _vybranaZalozka = 0;
   final List<Jazda> _jazdy = [];
@@ -54,10 +60,12 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   late final StreamSubscription<bool> _stavVozidla;
 
   late DateTime _vybranyDatum;
+  var _nacitavaUdaje = true;
 
   @override
   void initState() {
     super.initState();
+    _ulozisko = widget.ulozisko ?? SqliteLokalneUlozisko();
     _vybranyDatum = DateTime.now();
     _gpsTracking.addListener(_obnovitGpsStav);
     _dokoncenaJazda = _gpsTracking.dokonceneJazdy.listen(
@@ -66,7 +74,26 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     _stavVozidla = _rozpoznavanieAktivity.stavVozidla.listen(
       _spracovatStavVozidla,
     );
-    _pripravitAutomatickeSledovanie();
+    _inicializovatAplikaciu();
+  }
+
+  Future<void> _inicializovatAplikaciu() async {
+    try {
+      final udaje = await _ulozisko.nacitat();
+      if (!mounted) return;
+      setState(() {
+        _jazdy
+          ..clear()
+          ..addAll(udaje.jazdy);
+        _nastaveniaVozidla = udaje.nastavenia;
+        _nacitavaUdaje = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _nacitavaUdaje = false);
+      _zobrazitSpravu('Lokálne údaje sa nepodarilo načítať.');
+    }
+    await _pripravitAutomatickeSledovanie();
   }
 
   Future<void> _pripravitAutomatickeSledovanie() async {
@@ -107,28 +134,32 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     _gpsTracking
       ..removeListener(_obnovitGpsStav)
       ..dispose();
+    _ulozisko.zavriet();
     super.dispose();
   }
 
-  void _ulozitAutomatickuJazdu(DokoncenaGpsJazda jazda) {
-    if (!mounted) return;
+  Future<void> _ulozitAutomatickuJazdu(DokoncenaGpsJazda jazda) async {
     String miesto(TrasaBod bod) =>
         '${bod.latitude.toStringAsFixed(5)}, ${bod.longitude.toStringAsFixed(5)}';
     String cas(DateTime datum) =>
         '${datum.hour.toString().padLeft(2, '0')}:${datum.minute.toString().padLeft(2, '0')}';
-    setState(() {
-      _jazdy.add(
-        Jazda(
-          datum: jazda.zaciatok.cas,
-          odkial: miesto(jazda.zaciatok),
-          kam: miesto(jazda.koniec),
-          zaciatok: cas(jazda.zaciatok.cas),
-          koniec: cas(jazda.koniec.cas),
-          kilometre: jazda.prejdeneMetre / 1000,
-          typ: TypJazdy.sluzobna,
-        ),
-      );
-    });
+    final ukladanaJazda = Jazda(
+      datum: jazda.zaciatok.cas,
+      odkial: miesto(jazda.zaciatok),
+      kam: miesto(jazda.koniec),
+      zaciatok: cas(jazda.zaciatok.cas),
+      koniec: cas(jazda.koniec.cas),
+      kilometre: jazda.prejdeneMetre / 1000,
+      typ: TypJazdy.sluzobna,
+    );
+    try {
+      final ulozenaJazda = await _ulozisko.ulozitJazdu(ukladanaJazda);
+      if (!mounted) return;
+      setState(() => _jazdy.add(ulozenaJazda));
+    } catch (_) {
+      _zobrazitSpravu('Automatickú jazdu sa nepodarilo uložiť.');
+      return;
+    }
     _zobrazitSpravu('Služobná jazda bola automaticky zaznamenaná.');
   }
 
@@ -141,8 +172,17 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sprava)));
   }
 
-  void _ulozitNastaveniaVozidla(NastaveniaVozidla nastavenia) {
+  Future<void> _ulozitNastaveniaVozidla(NastaveniaVozidla nastavenia) async {
+    await _ulozisko.ulozitNastavenia(nastavenia);
     setState(() => _nastaveniaVozidla = nastavenia);
+  }
+
+  Future<void> _upravitJazdu(JazdaDna upravenaJazda) async {
+    final ulozenaJazda = await _ulozisko.ulozitJazdu(upravenaJazda.jazda);
+    if (!mounted) return;
+    setState(() {
+      _jazdy[upravenaJazda.indexVZozname] = ulozenaJazda;
+    });
   }
 
   Future<void> _otvoritKalendar() async {
@@ -178,12 +218,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
         builder: (context) => DetailDnaPage(
           datum: formatovatDatum(datum),
           jazdy: jazdyDna,
-          onJazdaUpravena: (upravenaJazda) {
-            if (!mounted) return;
-            setState(() {
-              _jazdy[upravenaJazda.indexVZozname] = upravenaJazda.jazda;
-            });
-          },
+          onJazdaUpravena: _upravitJazdu,
         ),
       ),
     );
@@ -216,9 +251,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _vybranaZalozka == 2
-              ? 'Nastavenia'
-              : 'Kniha jázd – Drive Log Cloud',
+          _vybranaZalozka == 2 ? 'Nastavenia' : 'Kniha jázd – Drive Log Cloud',
         ),
         actions: [
           if (_vybranaZalozka == 0)
@@ -230,7 +263,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
         ],
       ),
       body: SafeArea(
-        child: _vybranaZalozka == 2
+        child: _nacitavaUdaje
+            ? const Center(child: CircularProgressIndicator())
+            : _vybranaZalozka == 2
             ? NastaveniaVozidlaPage(
                 nastavenia: _nastaveniaVozidla,
                 onUlozit: _ulozitNastaveniaVozidla,
@@ -339,7 +374,7 @@ class _PrehladPlaceholder extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
-          'Mesačný a ročný prehľad doplníme po uložení jázd do databázy.',
+          'Mesačný a ročný prehľad doplníme v ďalšom kroku.',
           style: Theme.of(context).textTheme.titleMedium,
           textAlign: TextAlign.center,
         ),
