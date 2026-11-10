@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -14,7 +16,11 @@ import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
 import 'utils/format_datumu.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    await Firebase.initializeApp();
+  }
   runApp(const KnihaJazdApp());
 }
 
