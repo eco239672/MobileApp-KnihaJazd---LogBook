@@ -55,8 +55,10 @@ void main() {
       final nacitane = await znovuotvoreneUlozisko.nacitat();
 
       expect(vytvorenaJazda.id, isNotNull);
+      expect(vytvorenaJazda.cloudId, isNotNull);
       expect(nacitane.jazdy, hasLength(1));
       expect(nacitane.jazdy.single.id, vytvorenaJazda.id);
+      expect(nacitane.jazdy.single.cloudId, vytvorenaJazda.cloudId);
       expect(nacitane.jazdy.single.kilometre, 31.2);
       expect(nacitane.nastavenia.spz, 'NZ123AB');
       expect(nacitane.nastavenia.priemernaSpotreba, 6.4);

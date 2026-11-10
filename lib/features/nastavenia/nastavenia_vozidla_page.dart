@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/nastavenia_vozidla.dart';
+import '../../services/cloudova_synchronizacia.dart';
 import '../../services/rozpoznavanie_aktivity_service.dart';
 import '../../utils/decimalny_vstup.dart';
 
@@ -11,6 +12,10 @@ class NastaveniaVozidlaPage extends StatefulWidget {
     required this.onSpatNaJazdy,
     required this.onPovolitRozpoznavanie,
     required this.onZistitStavRozpoznavania,
+    required this.cloudovyUcet,
+    required this.onPrihlasitACSynchronizovat,
+    required this.onSynchronizovat,
+    required this.onOdhlasitZCloudu,
     super.key,
   });
 
@@ -19,6 +24,10 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   final VoidCallback onSpatNaJazdy;
   final Future<StavRozpoznavaniaAktivity> Function() onPovolitRozpoznavanie;
   final Future<StavRozpoznavaniaAktivity> Function() onZistitStavRozpoznavania;
+  final CloudovyUcet? cloudovyUcet;
+  final Future<void> Function() onPrihlasitACSynchronizovat;
+  final Future<void> Function() onSynchronizovat;
+  final Future<void> Function() onOdhlasitZCloudu;
 
   @override
   State<NastaveniaVozidlaPage> createState() => _NastaveniaVozidlaPageState();
@@ -32,6 +41,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
   late final TextEditingController _cenaNafty;
   StavRozpoznavaniaAktivity? _stavRozpoznavania;
   var _meniSaRozpoznavanie = false;
+  var _pracujeSCloudom = false;
 
   @override
   void initState() {
@@ -103,6 +113,22 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
       );
     } finally {
       if (mounted) setState(() => _meniSaRozpoznavanie = false);
+    }
+  }
+
+  Future<void> _vykonatCloudovuAkciu(Future<void> Function() akcia) async {
+    setState(() => _pracujeSCloudom = true);
+    try {
+      await akcia();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Synchronizácia s cloudom sa nepodarila.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _pracujeSCloudom = false);
     }
   }
 
@@ -224,6 +250,71 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
                   ),
                 ],
               ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Cloudová synchronizácia',
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.cloudovyUcet == null
+                      ? 'Prihlásením cez Google sa jazdy bezpečne zálohujú do vášho súkromného priestoru vo Firestore.'
+                      : 'Prihlásený účet: ${widget.cloudovyUcet!.email ?? widget.cloudovyUcet!.meno ?? 'Google účet'}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                if (widget.cloudovyUcet == null)
+                  FilledButton.icon(
+                    onPressed: _pracujeSCloudom
+                        ? null
+                        : () => _vykonatCloudovuAkciu(
+                            widget.onPrihlasitACSynchronizovat,
+                          ),
+                    icon: _pracujeSCloudom
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.cloud_upload_outlined),
+                    label: const Text('Prihlásiť cez Google a synchronizovať'),
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _pracujeSCloudom
+                              ? null
+                              : () => _vykonatCloudovuAkciu(
+                                  widget.onSynchronizovat,
+                                ),
+                          icon: const Icon(Icons.sync),
+                          label: const Text('Synchronizovať'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        tooltip: 'Odhlásiť z cloudu',
+                        onPressed: _pracujeSCloudom
+                            ? null
+                            : () => _vykonatCloudovuAkciu(
+                                widget.onOdhlasitZCloudu,
+                              ),
+                        icon: const Icon(Icons.logout),
+                      ),
+                    ],
+                  ),
+              ],
             ),
           ),
         ),

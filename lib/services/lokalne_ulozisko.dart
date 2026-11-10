@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
 
@@ -34,11 +36,12 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
         databazovaCesta ?? path.join(await getDatabasesPath(), _nazovDatabazy);
     final databaza = await openDatabase(
       ciel,
-      version: 2,
+      version: 3,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE jazdy(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cloud_id TEXT NOT NULL,
             datum TEXT NOT NULL,
             odkial TEXT NOT NULL,
             kam TEXT NOT NULL,
@@ -72,6 +75,19 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
             WHERE cena_paliva IS NOT NULL
           ''');
         }
+        if (staraVerzia < 3) {
+          await db.execute('ALTER TABLE jazdy ADD COLUMN cloud_id TEXT');
+          final jazdy = await db.query('jazdy', columns: ['id']);
+          for (final jazda in jazdy) {
+            final id = jazda['id']! as int;
+            await db.update(
+              'jazdy',
+              {'cloud_id': 'povodna-jazda-$id'},
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+          }
+        }
       },
     );
     _databaza = databaza;
@@ -96,14 +112,16 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
   @override
   Future<Jazda> ulozitJazdu(Jazda jazda) async {
     final db = await _db;
-    final hodnoty = _jazdaDoMapy(jazda);
+    final sCloudId = jazda.cloudId ?? _novyCloudId();
+    final sCloudJazda = jazda.copyWith(cloudId: sCloudId);
+    final hodnoty = _jazdaDoMapy(sCloudJazda);
     final id = jazda.id;
     if (id == null) {
       final noveId = await db.insert('jazdy', hodnoty);
-      return jazda.copyWith(id: noveId);
+      return sCloudJazda.copyWith(id: noveId);
     }
     await db.update('jazdy', hodnoty, where: 'id = ?', whereArgs: [id]);
-    return jazda;
+    return sCloudJazda;
   }
 
   @override
@@ -125,6 +143,7 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
   }
 
   Map<String, Object?> _jazdaDoMapy(Jazda jazda) => {
+    'cloud_id': jazda.cloudId,
     'datum': jazda.datum.toIso8601String(),
     'odkial': jazda.odkial,
     'kam': jazda.kam,
@@ -136,6 +155,7 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
 
   Jazda _jazdaZMapy(Map<String, Object?> mapa) => Jazda(
     id: mapa['id'] as int,
+    cloudId: mapa['cloud_id'] as String?,
     datum: DateTime.parse(mapa['datum']! as String),
     odkial: mapa['odkial']! as String,
     kam: mapa['kam']! as String,
@@ -152,6 +172,9 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
         cenaBenzinu: (mapa['cena_benzinu'] as num?)?.toDouble(),
         cenaNafty: (mapa['cena_nafty'] as num?)?.toDouble(),
       );
+
+  String _novyCloudId() =>
+      '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
 }
 
 /// Jednoduchá implementácia používaná len vo widget testoch.
@@ -166,7 +189,14 @@ class PamatoveLokalneUlozisko implements LokalneUlozisko {
 
   @override
   Future<Jazda> ulozitJazdu(Jazda jazda) async {
-    final ulozena = jazda.id == null ? jazda.copyWith(id: _dalsieId++) : jazda;
+    final ulozena = jazda.id == null
+        ? jazda.copyWith(
+            id: _dalsieId++,
+            cloudId:
+                jazda.cloudId ??
+                'pamat-${DateTime.now().microsecondsSinceEpoch}',
+          )
+        : jazda;
     final index = _jazdy.indexWhere((polozka) => polozka.id == ulozena.id);
     if (index < 0) {
       _jazdy.add(ulozena);

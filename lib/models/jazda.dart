@@ -10,6 +10,7 @@ enum TypJazdy {
 class Jazda {
   const Jazda({
     this.id,
+    this.cloudId,
     required this.datum,
     required this.odkial,
     required this.kam,
@@ -20,6 +21,9 @@ class Jazda {
   });
 
   final int? id;
+
+  /// Stabilný identifikátor záznamu používaný pri synchronizácii do cloudu.
+  final String? cloudId;
   final DateTime datum;
   final String odkial;
   final String kam;
@@ -30,6 +34,7 @@ class Jazda {
 
   Jazda copyWith({
     int? id,
+    String? cloudId,
     DateTime? datum,
     String? odkial,
     String? kam,
@@ -40,6 +45,7 @@ class Jazda {
   }) {
     return Jazda(
       id: id ?? this.id,
+      cloudId: cloudId ?? this.cloudId,
       datum: datum ?? this.datum,
       odkial: odkial ?? this.odkial,
       kam: kam ?? this.kam,

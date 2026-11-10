@@ -12,6 +12,7 @@ import 'models/jazda.dart';
 import 'models/nastavenia_vozidla.dart';
 import 'models/trasa_bod.dart';
 import 'services/gps_tracking_service.dart';
+import 'services/cloudova_synchronizacia.dart';
 import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
 import 'utils/format_datumu.dart';
@@ -59,6 +60,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   final _gpsTracking = GpsTrackingService();
   final _rozpoznavanieAktivity = RozpoznavanieAktivityService();
   late final LokalneUlozisko _ulozisko;
+  CloudovaSynchronizacia? _cloudovaSynchronizacia;
   NastaveniaVozidla _nastaveniaVozidla = const NastaveniaVozidla();
   var _vybranaZalozka = 0;
   final List<Jazda> _jazdy = [];
@@ -67,6 +69,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
 
   late DateTime _vybranyDatum;
   var _nacitavaUdaje = true;
+
+  CloudovaSynchronizacia get _cloud =>
+      _cloudovaSynchronizacia ??= CloudovaSynchronizacia();
 
   @override
   void initState() {
@@ -162,6 +167,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
       final ulozenaJazda = await _ulozisko.ulozitJazdu(ukladanaJazda);
       if (!mounted) return;
       setState(() => _jazdy.add(ulozenaJazda));
+      await _synchronizovatNaPozadi();
     } catch (_) {
       _zobrazitSpravu('Automatickú jazdu sa nepodarilo uložiť.');
       return;
@@ -181,6 +187,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   Future<void> _ulozitNastaveniaVozidla(NastaveniaVozidla nastavenia) async {
     await _ulozisko.ulozitNastavenia(nastavenia);
     setState(() => _nastaveniaVozidla = nastavenia);
+    await _synchronizovatNaPozadi();
   }
 
   Future<void> _upravitJazdu(JazdaDna upravenaJazda) async {
@@ -189,6 +196,65 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     setState(() {
       _jazdy[upravenaJazda.indexVZozname] = ulozenaJazda;
     });
+    await _synchronizovatNaPozadi();
+  }
+
+  Future<void> _prihlasitACSynchronizovat() async {
+    try {
+      final ucet = await _cloud.prihlasitCezGoogle();
+      if (ucet == null || !mounted) return;
+      setState(() {});
+      await _synchronizovatDoCloudu(zobrazitVysledok: true);
+    } catch (_) {
+      _zobrazitSpravu(
+        'Prihlásenie cez Google sa nepodarilo dokončiť. Skontroluj pripojenie a nastavenie aplikácie vo Firebase.',
+      );
+    }
+  }
+
+  Future<void> _synchronizovatNaPozadi() async {
+    if (_cloudovaSynchronizacia?.aktualnyUcet == null) return;
+    try {
+      await _synchronizovatDoCloudu();
+    } catch (_) {
+      // Miestne uloženie je dokončené; synchronizácia sa zopakuje manuálne.
+    }
+  }
+
+  Future<void> _synchronizovatDoCloudu({bool zobrazitVysledok = false}) async {
+    final vysledok = await _cloud.synchronizovat(
+      jazdy: _jazdy,
+      nastavenia: _nastaveniaVozidla,
+    );
+    final noveJazdy = <Jazda>[];
+    for (final jazda in vysledok.stiahnuteJazdy) {
+      final ulozena = await _ulozisko.ulozitJazdu(jazda);
+      noveJazdy.add(ulozena);
+    }
+    final vzdialeneNastavenia = vysledok.stiahnuteNastavenia;
+    if (vzdialeneNastavenia != null) {
+      await _ulozisko.ulozitNastavenia(vzdialeneNastavenia);
+    }
+    if (!mounted) return;
+    if (noveJazdy.isNotEmpty || vzdialeneNastavenia != null) {
+      setState(() {
+        _jazdy.addAll(noveJazdy);
+        if (vzdialeneNastavenia != null) {
+          _nastaveniaVozidla = vzdialeneNastavenia;
+        }
+      });
+    }
+    if (zobrazitVysledok) {
+      _zobrazitSpravu('Jazdy a nastavenia sú zosynchronizované s cloudom.');
+    }
+  }
+
+  Future<void> _odhlasitZCloudu() async {
+    await _cloud.odhlasit();
+    if (mounted) {
+      setState(() {});
+      _zobrazitSpravu('Z cloudového účtu ste boli odhlásený.');
+    }
   }
 
   Future<void> _otvoritKalendar() async {
@@ -280,6 +346,11 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
                 },
                 onPovolitRozpoznavanie: _povolitRozpoznavanie,
                 onZistitStavRozpoznavania: _rozpoznavanieAktivity.zistitStav,
+                cloudovyUcet: _cloud.aktualnyUcet,
+                onPrihlasitACSynchronizovat: _prihlasitACSynchronizovat,
+                onSynchronizovat: () =>
+                    _synchronizovatDoCloudu(zobrazitVysledok: true),
+                onOdhlasitZCloudu: _odhlasitZCloudu,
               )
             : _vybranaZalozka == 1
             ? const _PrehladPlaceholder()
