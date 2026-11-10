@@ -12,7 +12,20 @@
           "package_name": "sk.knihajazd.kniha_jazd"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "210303449805-87v5gqis10hioreb6buli1gkau7lk136.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "sk.knihajazd.kniha_jazd",
+            "certificate_hash": "74727acbe40b3cc905f27110101b8b3f9ee4d8fb"
+          }
+        },
+        {
+          "client_id": "210303449805-eegmcbkd7stcrn1k8cjimvakuncstnd7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBoVz3JXcBMq3HZN_QpL5hlsoC2dzA_cQU"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+        "other_platform_oauth_client": [
+          {
+            "client_id": "210303449805-eegmcbkd7stcrn1k8cjimvakuncstnd7.apps.googleusercontent.com",
+            "client_type": 3
+          }
+        ]
         }
       }
     }
