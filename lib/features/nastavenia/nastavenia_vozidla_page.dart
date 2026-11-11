@@ -12,6 +12,7 @@ class NastaveniaVozidlaPage extends StatefulWidget {
     required this.onSpatNaJazdy,
     required this.onPovolitRozpoznavanie,
     required this.onZistitStavRozpoznavania,
+    required this.onOtvoritNastaveniaPolohy,
     required this.cloudovyUcet,
     required this.onPrihlasitACSynchronizovat,
     required this.onSynchronizovat,
@@ -25,6 +26,7 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   final VoidCallback onSpatNaJazdy;
   final Future<StavRozpoznavaniaAktivity> Function() onPovolitRozpoznavanie;
   final Future<StavRozpoznavaniaAktivity> Function() onZistitStavRozpoznavania;
+  final Future<void> Function() onOtvoritNastaveniaPolohy;
   final CloudovyUcet? cloudovyUcet;
   final Future<void> Function() onPrihlasitACSynchronizovat;
   final Future<void> Function() onSynchronizovat;
@@ -35,7 +37,8 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   State<NastaveniaVozidlaPage> createState() => _NastaveniaVozidlaPageState();
 }
 
-class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
+class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
+    with WidgetsBindingObserver {
   final _formular = GlobalKey<FormState>();
   late final TextEditingController _spz;
   late final TextEditingController _spotreba;
@@ -43,12 +46,14 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
   late final TextEditingController _cenaNafty;
   StavRozpoznavaniaAktivity? _stavRozpoznavania;
   var _meniSaRozpoznavanie = false;
+  var _otvaraNastaveniaPolohy = false;
   var _pracujeSCloudom = false;
   var _vytvaraUkazkoveJazdy = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _spz = TextEditingController(text: widget.nastavenia.spz);
     _spotreba = TextEditingController(
       text: widget.nastavenia.priemernaSpotreba?.toString(),
@@ -64,6 +69,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _spz.dispose();
     _spotreba.dispose();
     _cenaBenzinu.dispose();
@@ -101,6 +107,32 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
     if (mounted) setState(() => _stavRozpoznavania = stav);
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState stavAplikacie) {
+    if (stavAplikacie == AppLifecycleState.resumed) {
+      _obnovitPoNavrateZoSystemovychNastaveni();
+    }
+  }
+
+  Future<void> _obnovitPoNavrateZoSystemovychNastaveni() async {
+    try {
+      await _nacitatStavRozpoznavania();
+      final stav = _stavRozpoznavania;
+      if (stav == null ||
+          !stav.povolene ||
+          !stav.aktivne ||
+          !stav.polohaNaPozadiPovolena) {
+        return;
+      }
+      // Po návrate zo systémových nastavení znovu zaregistruje Android
+      // rozpoznávanie jazdy, bez ďalšieho dialógu pre používateľa.
+      final obnovenyStav = await widget.onPovolitRozpoznavanie();
+      if (mounted) setState(() => _stavRozpoznavania = obnovenyStav);
+    } catch (_) {
+      // Používateľ môže aplikáciu naďalej používať a stav znovu overiť neskôr.
+    }
+  }
+
   Future<void> _povolitRozpoznavanie() async {
     setState(() => _meniSaRozpoznavanie = true);
     try {
@@ -116,6 +148,15 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
       );
     } finally {
       if (mounted) setState(() => _meniSaRozpoznavanie = false);
+    }
+  }
+
+  Future<void> _otvoritNastaveniaPolohy() async {
+    setState(() => _otvaraNastaveniaPolohy = true);
+    try {
+      await widget.onOtvoritNastaveniaPolohy();
+    } finally {
+      if (mounted) setState(() => _otvaraNastaveniaPolohy = false);
     }
   }
 
@@ -371,41 +412,54 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Automatické rozpoznanie jazdy',
+                  'Automatické sledovanie jázd',
                   style: theme.textTheme.titleLarge,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Android rozpozná stav „v aute“ a až potom zapne presné GPS sledovanie.',
+                  'Telefón rozpozná jazdu autom, zapne GPS na pozadí a po skončení uloží záznam do knihy jázd.',
                   style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  _stavRozpoznavania?.aktivne == true
-                      ? (_stavRozpoznavania?.vAute == true
-                            ? 'Rozpoznávanie je zapnuté: práve v aute.'
-                            : 'Rozpoznávanie je zapnuté a čaká na jazdu.')
-                      : 'Vyžaduje jednorazové povolenie Fyzická aktivita.',
+                  _stavRozpoznavania?.aktivne != true
+                      ? 'Stačí raz povoliť rozpoznávanie pohybu.'
+                      : !_stavRozpoznavania!.polohaNaPozadiPovolena
+                      ? 'Na automatické sledovanie ešte treba povoliť polohu na pozadí.'
+                      : _stavRozpoznavania?.vAute == true
+                      ? 'Automatické sledovanie je pripravené: práve v aute.'
+                      : 'Automatické sledovanie je pripravené a čaká na jazdu.',
                   style: theme.textTheme.labelLarge,
                 ),
                 const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _meniSaRozpoznavanie
-                      ? null
-                      : _povolitRozpoznavanie,
-                  icon: _meniSaRozpoznavanie
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.directions_car_outlined),
-                  label: Text(
-                    _stavRozpoznavania?.aktivne == true
-                        ? 'Znova overiť povolenie'
-                        : 'Povoliť rozpoznávanie jazdy',
+                if (_stavRozpoznavania?.aktivne != true)
+                  FilledButton.icon(
+                    onPressed: _meniSaRozpoznavanie
+                        ? null
+                        : _povolitRozpoznavanie,
+                    icon: _meniSaRozpoznavanie
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.directions_car_outlined),
+                    label: const Text('Zapnúť automatické sledovanie'),
+                  )
+                else if (!_stavRozpoznavania!.polohaNaPozadiPovolena)
+                  FilledButton.icon(
+                    onPressed: _otvaraNastaveniaPolohy
+                        ? null
+                        : _otvoritNastaveniaPolohy,
+                    icon: _otvaraNastaveniaPolohy
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.location_on_outlined),
+                    label: const Text('Zapnúť automatické sledovanie'),
                   ),
-                ),
               ],
             ),
           ),

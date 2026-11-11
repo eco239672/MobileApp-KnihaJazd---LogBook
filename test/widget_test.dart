@@ -21,6 +21,41 @@ void main() {
     expect(find.text('Pridať jazdu'), findsNothing);
   });
 
+  testWidgets('na hlavnej obrazovke zobrazí iba aktuálny mesiac', (
+    tester,
+  ) async {
+    final ulozisko = PamatoveLokalneUlozisko();
+    final dnes = DateTime.now();
+    await ulozisko.ulozitJazdu(
+      Jazda(
+        datum: dnes,
+        odkial: 'Aktuálna',
+        kam: 'jazda',
+        zaciatok: '08:00',
+        koniec: '08:30',
+        kilometre: 10,
+        typ: TypJazdy.sluzobna,
+      ),
+    );
+    await ulozisko.ulozitJazdu(
+      Jazda(
+        datum: DateTime(dnes.year, dnes.month - 1, 15),
+        odkial: 'Staršia',
+        kam: 'jazda',
+        zaciatok: '08:00',
+        koniec: '08:30',
+        kilometre: 10,
+        typ: TypJazdy.sluzobna,
+      ),
+    );
+
+    await tester.pumpWidget(KnihaJazdApp(ulozisko: ulozisko));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Aktuálna  →  jazda'), findsOneWidget);
+    expect(find.text('Staršia  →  jazda'), findsNothing);
+  });
+
   testWidgets('umožní upraviť kilometre jazdy vo vybranom dni', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

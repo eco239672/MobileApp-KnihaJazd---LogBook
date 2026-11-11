@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'features/jazdy/detail_dna_page.dart';
 import 'features/jazdy/widgets/jazda_polozka.dart';
@@ -12,7 +13,9 @@ import 'models/jazda.dart';
 import 'models/nastavenia_vozidla.dart';
 import 'models/trasa_bod.dart';
 import 'services/gps_tracking_service.dart';
+import 'services/gps_pozadie_service.dart';
 import 'services/cloudova_synchronizacia.dart';
+import 'services/excel_export_service.dart';
 import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
 import 'utils/format_datumu.dart';
@@ -58,7 +61,9 @@ class KnihaJazdHomePage extends StatefulWidget {
 
 class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   final _gpsTracking = GpsTrackingService();
+  final _gpsPozadie = GpsPozadieService();
   final _rozpoznavanieAktivity = RozpoznavanieAktivityService();
+  final _excelExport = ExcelExportService();
   late final LokalneUlozisko _ulozisko;
   CloudovaSynchronizacia? _cloudovaSynchronizacia;
   NastaveniaVozidla _nastaveniaVozidla = const NastaveniaVozidla();
@@ -69,6 +74,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
 
   late DateTime _vybranyDatum;
   var _nacitavaUdaje = true;
+  var _exportujeExcel = false;
 
   CloudovaSynchronizacia get _cloud =>
       _cloudovaSynchronizacia ??= CloudovaSynchronizacia();
@@ -104,10 +110,25 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
       setState(() => _nacitavaUdaje = false);
       _zobrazitSpravu('Lokálne údaje sa nepodarilo načítať.');
     }
+    await _preniestDokonceneJazdyZOzadia();
+    await _obnovitRozpoznavaniePoStarte();
     await _pripravitAutomatickeSledovanie();
   }
 
+  bool get _pouzivaAndroidPozadie =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  Future<void> _obnovitRozpoznavaniePoStarte() async {
+    if (!_pouzivaAndroidPozadie) return;
+    try {
+      await _rozpoznavanieAktivity.obnovitAkJeAktivne();
+    } catch (_) {
+      // Používateľ môže rozpoznávanie znovu potvrdiť v Nastaveniach aplikácie.
+    }
+  }
+
   Future<void> _pripravitAutomatickeSledovanie() async {
+    if (_pouzivaAndroidPozadie) return;
     final stav = await _rozpoznavanieAktivity.zistitStav();
     if (stav.aktivne && stav.vAute) {
       await _spustitAutomatickeSledovanie();
@@ -125,6 +146,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   }
 
   Future<void> _spracovatStavVozidla(bool vAute) async {
+    if (_pouzivaAndroidPozadie) return;
     if (vAute) {
       await _spustitAutomatickeSledovanie();
     } else if (_gpsTracking.sledovanieBezi) {
@@ -134,7 +156,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
 
   Future<StavRozpoznavaniaAktivity> _povolitRozpoznavanie() async {
     final stav = await _rozpoznavanieAktivity.povolitASpustit();
-    if (stav.vAute) await _spustitAutomatickeSledovanie();
+    if (!_pouzivaAndroidPozadie && stav.vAute) {
+      await _spustitAutomatickeSledovanie();
+    }
     return stav;
   }
 
@@ -149,7 +173,10 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     super.dispose();
   }
 
-  Future<void> _ulozitAutomatickuJazdu(DokoncenaGpsJazda jazda) async {
+  Future<bool> _ulozitAutomatickuJazdu(
+    DokoncenaGpsJazda jazda, {
+    bool zobrazitSpravu = true,
+  }) async {
     String miesto(TrasaBod bod) =>
         '${bod.latitude.toStringAsFixed(5)}, ${bod.longitude.toStringAsFixed(5)}';
     String cas(DateTime datum) =>
@@ -165,14 +192,40 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     );
     try {
       final ulozenaJazda = await _ulozisko.ulozitJazdu(ukladanaJazda);
-      if (!mounted) return;
+      if (!mounted) return true;
       setState(() => _jazdy.add(ulozenaJazda));
       await _synchronizovatNaPozadi();
     } catch (_) {
       _zobrazitSpravu('Automatickú jazdu sa nepodarilo uložiť.');
-      return;
+      return false;
     }
-    _zobrazitSpravu('Služobná jazda bola automaticky zaznamenaná.');
+    if (zobrazitSpravu) {
+      _zobrazitSpravu('Služobná jazda bola automaticky zaznamenaná.');
+    }
+    return true;
+  }
+
+  Future<void> _preniestDokonceneJazdyZOzadia() async {
+    if (!_pouzivaAndroidPozadie) return;
+    try {
+      final cakajuceJazdy = await _gpsPozadie.nacitatDokonceneJazdy();
+      final potvrdene = <String>[];
+      for (final zaznam in cakajuceJazdy) {
+        final ulozena = await _ulozitAutomatickuJazdu(
+          zaznam.jazda,
+          zobrazitSpravu: false,
+        );
+        if (ulozena) potvrdene.add(zaznam.identifikator);
+      }
+      await _gpsPozadie.potvrditUlozenie(potvrdene);
+      if (potvrdene.isNotEmpty) {
+        _zobrazitSpravu(
+          'Automaticky sa uložilo ${potvrdene.length} ${potvrdene.length == 1 ? 'jazda' : 'jazdy'} z GPS.',
+        );
+      }
+    } catch (_) {
+      // Natívny záznam zostane v telefóne a prenesie sa pri ďalšom otvorení.
+    }
   }
 
   void _obnovitGpsStav() {
@@ -257,9 +310,29 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     }
   }
 
+  Future<void> _exportovatDoExcelu() async {
+    if (_exportujeExcel) return;
+    setState(() => _exportujeExcel = true);
+    try {
+      final subor = await _excelExport.vytvoritSubor(
+        jazdy: _jazdy,
+        nastavenia: _nastaveniaVozidla,
+      );
+      if (!mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(subor.path)], subject: 'Kniha jázd'),
+      );
+      _zobrazitSpravu('Súbor Excel je pripravený na uloženie alebo odoslanie.');
+    } catch (_) {
+      _zobrazitSpravu('Export do Excelu sa nepodarilo vytvoriť.');
+    } finally {
+      if (mounted) setState(() => _exportujeExcel = false);
+    }
+  }
+
   Future<int> _nahraditUkazkoveJazdy() async {
     final dnes = DateTime.now();
-    final prvyDenMesiaca = DateTime(dnes.year, dnes.month);
+    final prvyDenRoka = DateTime(dnes.year);
     final trasy = [
       (ciel: 'Nové Zámky', kilometre: 18.2),
       (ciel: 'Nitra', kilometre: 43.7),
@@ -270,8 +343,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     final povodneJazdy = _jazdy
         .where(
           (jazda) =>
-              !jazda.datum.isBefore(prvyDenMesiaca) &&
-              !jazda.datum.isAfter(dnes),
+              !jazda.datum.isBefore(prvyDenRoka) && !jazda.datum.isAfter(dnes),
         )
         .toList();
     if (_cloudovaSynchronizacia?.aktualnyUcet != null) {
@@ -282,7 +354,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     final noveJazdy = <Jazda>[];
 
     for (
-      var datum = prvyDenMesiaca;
+      var datum = prvyDenRoka;
       !datum.isAfter(dnes);
       datum = datum.add(const Duration(days: 1))
     ) {
@@ -319,8 +391,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
       _jazdy
         ..removeWhere(
           (jazda) =>
-              !jazda.datum.isBefore(prvyDenMesiaca) &&
-              !jazda.datum.isAfter(dnes),
+              !jazda.datum.isBefore(prvyDenRoka) && !jazda.datum.isAfter(dnes),
         )
         ..addAll(noveJazdy);
     });
@@ -335,7 +406,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
       initialDate: _vybranyDatum,
       firstDate: DateTime(aktualnyRok),
       lastDate: DateTime(aktualnyRok + 1, 12, 31),
-      helpText: 'Vyber dátum jázd',
+      helpText: 'Vyber ľubovoľný deň mesiaca',
       cancelText: 'Zrušiť',
       confirmText: 'Vybrať',
     );
@@ -343,7 +414,6 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     if (vybranyDatum == null || !mounted) return;
 
     setState(() => _vybranyDatum = vybranyDatum);
-    await _otvoritDetailDna(vybranyDatum);
   }
 
   Future<void> _otvoritDetailDna(DateTime datum) async {
@@ -384,11 +454,14 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     final spotrebaPaliva = _nastaveniaVozidla.priemernaSpotreba == null
         ? null
         : kilometre * _nastaveniaVozidla.priemernaSpotreba! / 100;
-    final jazdyPodlaDna = <String, List<Jazda>>{};
-    for (final jazda in _jazdy) {
-      jazdyPodlaDna
-          .putIfAbsent(formatovatDatum(jazda.datum), () => [])
-          .add(jazda);
+    final jazdyPodlaDna = <DateTime, List<Jazda>>{};
+    for (final jazda in jazdyVMesiaci) {
+      final datum = DateTime(
+        jazda.datum.year,
+        jazda.datum.month,
+        jazda.datum.day,
+      );
+      jazdyPodlaDna.putIfAbsent(datum, () => []).add(jazda);
     }
 
     return Scaffold(
@@ -417,6 +490,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
                 },
                 onPovolitRozpoznavanie: _povolitRozpoznavanie,
                 onZistitStavRozpoznavania: _rozpoznavanieAktivity.zistitStav,
+                onOtvoritNastaveniaPolohy: _gpsPozadie.otvoritNastaveniaPolohy,
                 cloudovyUcet: _cloud.aktualnyUcet,
                 onPrihlasitACSynchronizovat: _prihlasitACSynchronizovat,
                 onSynchronizovat: () =>
@@ -427,7 +501,12 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
                     : null,
               )
             : _vybranaZalozka == 1
-            ? const _PrehladPlaceholder()
+            ? _PrehladPage(
+                jazdy: _jazdy,
+                nastavenia: _nastaveniaVozidla,
+                exportuje: _exportujeExcel,
+                onExportovat: _exportovatDoExcelu,
+              )
             : ListView(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                 children: [
@@ -484,7 +563,11 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
                   Text('Jazdy podľa dní', style: theme.textTheme.titleLarge),
                   const SizedBox(height: 4),
                   ...jazdyPodlaDna.entries.map(
-                    (den) => _DennyBlok(datum: den.key, jazdy: den.value),
+                    (den) => _DennyBlok(
+                      datum: formatovatDatum(den.key),
+                      jazdy: den.value,
+                      onTap: () => _otvoritDetailDna(den.key),
+                    ),
                   ),
                 ],
               ),
@@ -516,20 +599,59 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   }
 }
 
-class _PrehladPlaceholder extends StatelessWidget {
-  const _PrehladPlaceholder();
+class _PrehladPage extends StatelessWidget {
+  const _PrehladPage({
+    required this.jazdy,
+    required this.nastavenia,
+    required this.exportuje,
+    required this.onExportovat,
+  });
+
+  final List<Jazda> jazdy;
+  final NastaveniaVozidla nastavenia;
+  final bool exportuje;
+  final Future<void> Function() onExportovat;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          'Mesačný a ročný prehľad doplníme v ďalšom kroku.',
-          style: Theme.of(context).textTheme.titleMedium,
-          textAlign: TextAlign.center,
+    final kilometre = jazdy.fold<double>(
+      0,
+      (sucet, jazda) => sucet + jazda.kilometre,
+    );
+    final spotreba = nastavenia.priemernaSpotreba == null
+        ? null
+        : kilometre * nastavenia.priemernaSpotreba! / 100;
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text('Prehľad jázd', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          'Celkom ${jazdy.length} záznamov a ${kilometre.toStringAsFixed(1)} km.',
         ),
-      ),
+        if (spotreba != null)
+          Text('Odhadovaná spotreba paliva: ${spotreba.toStringAsFixed(1)} l.'),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: exportuje ? null : onExportovat,
+          icon: exportuje
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.file_download_outlined),
+          label: Text(
+            exportuje ? 'Pripravujem Excel…' : 'Exportovať do Excelu',
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Súbor bude mať ročný prehľad a samostatný list pre každý mesiac s jazdami.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      ],
     );
   }
 }
@@ -555,10 +677,15 @@ class _Statistika extends StatelessWidget {
 }
 
 class _DennyBlok extends StatelessWidget {
-  const _DennyBlok({required this.datum, required this.jazdy});
+  const _DennyBlok({
+    required this.datum,
+    required this.jazdy,
+    required this.onTap,
+  });
 
   final String datum;
   final List<Jazda> jazdy;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -584,7 +711,7 @@ class _DennyBlok extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          ...jazdy.map((jazda) => JazdaPolozka(jazda: jazda)),
+          ...jazdy.map((jazda) => JazdaPolozka(jazda: jazda, onTap: onTap)),
         ],
       ),
     );

@@ -70,16 +70,23 @@ class CloudovaSynchronizacia {
     if (user == null) {
       throw StateError('Pred úpravou cloudových dát sa treba prihlásiť.');
     }
-    final davka = _firestore.batch();
     final kolekcia = _firestore
         .collection('users')
         .doc(user.uid)
         .collection('jazdy');
-    for (final jazda in jazdy) {
-      final cloudId = jazda.cloudId;
-      if (cloudId != null) davka.delete(kolekcia.doc(cloudId));
+    final dokumenty = jazdy
+        .map((jazda) => jazda.cloudId)
+        .whereType<String>()
+        .map(kolekcia.doc)
+        .toList();
+    for (var zaciatok = 0; zaciatok < dokumenty.length; zaciatok += 500) {
+      final davka = _firestore.batch();
+      final koniec = (zaciatok + 500).clamp(0, dokumenty.length).toInt();
+      for (final dokument in dokumenty.sublist(zaciatok, koniec)) {
+        davka.delete(dokument);
+      }
+      await davka.commit();
     }
-    await davka.commit();
   }
 
   /// Stiahne chýbajúce jazdy a potom odošle miestne dáta do súkromnej vetvy
@@ -115,24 +122,30 @@ class CloudovaSynchronizacia {
         ? _nastaveniaZMapy(dokumentNastaveni.data()!)
         : null;
 
-    final davka = _firestore.batch();
-    for (final jazda in jazdy) {
-      final cloudId = jazda.cloudId;
-      if (cloudId == null) continue;
-      davka.set(
-        pouzivatel.collection('jazdy').doc(cloudId),
-        _jazdaDoMapy(jazda),
-        SetOptions(merge: true),
-      );
+    final jazdySCloudId = jazdy
+        .where((jazda) => jazda.cloudId != null)
+        .toList();
+    for (var zaciatok = 0; zaciatok < jazdySCloudId.length; zaciatok += 500) {
+      final davka = _firestore.batch();
+      final koniec = (zaciatok + 500).clamp(0, jazdySCloudId.length).toInt();
+      for (final jazda in jazdySCloudId.sublist(zaciatok, koniec)) {
+        davka.set(
+          pouzivatel.collection('jazdy').doc(jazda.cloudId!),
+          _jazdaDoMapy(jazda),
+          SetOptions(merge: true),
+        );
+      }
+      await davka.commit();
     }
     if (maMiestneNastavenia || !dokumentNastaveni.exists) {
-      davka.set(
+      final davkaNastaveni = _firestore.batch();
+      davkaNastaveni.set(
         pouzivatel.collection('profil').doc('vozidlo'),
         _nastaveniaDoMapy(nastavenia),
         SetOptions(merge: true),
       );
+      await davkaNastaveni.commit();
     }
-    await davka.commit();
 
     return VysledokSynchronizacie(
       stiahnuteJazdy: stiahnuteJazdy,

@@ -14,9 +14,9 @@ class RozpoznavanieAktivityService {
     'sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity_udalosti',
   );
 
-  Stream<bool> get stavVozidla => _udalosti
-      .receiveBroadcastStream()
-      .map((udalost) => (udalost as Map)['vAute'] == true);
+  Stream<bool> get stavVozidla => _udalosti.receiveBroadcastStream().map(
+    (udalost) => (udalost as Map)['vAute'] == true,
+  );
 
   Future<StavRozpoznavaniaAktivity> zistitStav() async {
     final odpoved = await _kanal.invokeMapMethod<String, dynamic>('stav');
@@ -24,6 +24,7 @@ class RozpoznavanieAktivityService {
       povolene: odpoved?['povolene'] == true,
       aktivne: odpoved?['aktivne'] == true,
       vAute: odpoved?['vAute'] == true,
+      polohaNaPozadiPovolena: odpoved?['polohaNaPozadiPovolena'] == true,
     );
   }
 
@@ -34,6 +35,11 @@ class RozpoznavanieAktivityService {
     return zistitStav();
   }
 
+  /// Obnoví registráciu po vynútenom zastavení aplikácie bez zobrazenia
+  /// ďalšieho dialógu, ak používateľ už rozpoznávanie povolil.
+  Future<void> obnovitAkJeAktivne() =>
+      _kanal.invokeMethod<void>('obnovitAkJeAktivne');
+
   Future<void> zastavit() => _kanal.invokeMethod<void>('zastavit');
 }
 
@@ -42,9 +48,11 @@ class StavRozpoznavaniaAktivity {
     required this.povolene,
     required this.aktivne,
     required this.vAute,
+    required this.polohaNaPozadiPovolena,
   });
 
   final bool povolene;
   final bool aktivne;
   final bool vAute;
+  final bool polohaNaPozadiPovolena;
 }

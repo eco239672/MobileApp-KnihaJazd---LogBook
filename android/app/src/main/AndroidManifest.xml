@@ -35,6 +35,10 @@
         <receiver
             android:name=".RozpoznavanieAktivityReceiver"
             android:exported="false" />
+        <service
+            android:name=".GpsSledovanieService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
