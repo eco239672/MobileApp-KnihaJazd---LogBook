@@ -216,18 +216,32 @@ class MainActivity : FlutterActivity() {
                 .build(),
         )
         val request = ActivityTransitionRequest(transitions)
-        ActivityRecognition.getClient(this)
-            .requestActivityTransitionUpdates(request, pendingIntent())
-            .addOnSuccessListener {
-                getSharedPreferences(
-                    RozpoznavanieAktivityReceiver.PREFERENCIE,
-                    Context.MODE_PRIVATE,
-                ).edit().putBoolean("aktivne", true).apply()
-                result.success(null)
-            }
-            .addOnFailureListener { chyba ->
-                result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
-            }
+        fun zaregistrovatAktualnyPendingIntent() {
+            ActivityRecognition.getClient(this)
+                .requestActivityTransitionUpdates(request, pendingIntent())
+                .addOnSuccessListener {
+                    getSharedPreferences(
+                        RozpoznavanieAktivityReceiver.PREFERENCIE,
+                        Context.MODE_PRIVATE,
+                    ).edit().putBoolean("aktivne", true).apply()
+                    result.success(null)
+                }
+                .addOnFailureListener { chyba ->
+                    result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
+                }
+        }
+
+        // Staršia verzia aplikácie prijímala tie isté udalosti cez BroadcastReceiver.
+        // Pred novou registráciou ho odstránime, aby pri aktualizácii nevznikli duplicitné
+        // pokusy o spustenie sledovania.
+        val staryPendingIntent = staryPendingIntent()
+        if (staryPendingIntent == null) {
+            zaregistrovatAktualnyPendingIntent()
+        } else {
+            ActivityRecognition.getClient(this)
+                .removeActivityTransitionUpdates(staryPendingIntent)
+                .addOnCompleteListener { zaregistrovatAktualnyPendingIntent() }
+        }
     }
 
     private fun zastavit(result: MethodChannel.Result) {
@@ -256,6 +270,21 @@ class MainActivity : FlutterActivity() {
         } else {
             android.app.PendingIntent.getService(this, 0, intent, flags)
         }
+    }
+
+    private fun staryPendingIntent(): android.app.PendingIntent? {
+        val flags = android.app.PendingIntent.FLAG_NO_CREATE or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                android.app.PendingIntent.FLAG_MUTABLE
+            } else {
+                0
+            }
+        return android.app.PendingIntent.getBroadcast(
+            this,
+            0,
+            Intent(this, RozpoznavanieAktivityReceiver::class.java),
+            flags,
+        )
     }
 
     private fun zaregistrovatPrijimac() {
