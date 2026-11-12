@@ -226,11 +226,23 @@ class MainActivity : FlutterActivity() {
             ActivityRecognition.getClient(this)
                 .requestActivityTransitionUpdates(request, pendingIntent())
                 .addOnSuccessListener {
-                    getSharedPreferences(
-                        RozpoznavanieAktivityReceiver.PREFERENCIE,
-                        Context.MODE_PRIVATE,
-                    ).edit().putBoolean("aktivne", true).apply()
-                    result.success(null)
+                    ActivityRecognition.getClient(this)
+                        .requestActivityUpdates(
+                            INTERVAL_AKTUALIZACIE_AKTIVITY_MILLIS,
+                            aktualizaciaAktivityPendingIntent(),
+                        )
+                        .addOnSuccessListener {
+                            getSharedPreferences(
+                                RozpoznavanieAktivityReceiver.PREFERENCIE,
+                                Context.MODE_PRIVATE,
+                            ).edit().putBoolean("aktivne", true).apply()
+                            result.success(null)
+                        }
+                        .addOnFailureListener { chyba ->
+                            ActivityRecognition.getClient(this)
+                                .removeActivityTransitionUpdates(pendingIntent())
+                            result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
+                        }
                 }
                 .addOnFailureListener { chyba ->
                     result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
@@ -254,11 +266,15 @@ class MainActivity : FlutterActivity() {
         ActivityRecognition.getClient(this)
             .removeActivityTransitionUpdates(pendingIntent())
             .addOnCompleteListener {
-                getSharedPreferences(
-                    RozpoznavanieAktivityReceiver.PREFERENCIE,
-                    Context.MODE_PRIVATE,
-                ).edit().putBoolean("aktivne", false).apply()
-                result.success(null)
+                ActivityRecognition.getClient(this)
+                    .removeActivityUpdates(aktualizaciaAktivityPendingIntent())
+                    .addOnCompleteListener {
+                        getSharedPreferences(
+                            RozpoznavanieAktivityReceiver.PREFERENCIE,
+                            Context.MODE_PRIVATE,
+                        ).edit().putBoolean("aktivne", false).apply()
+                        result.success(null)
+                    }
             }
     }
 
@@ -276,6 +292,22 @@ class MainActivity : FlutterActivity() {
         } else {
             android.app.PendingIntent.getService(this, 0, intent, flags)
         }
+    }
+
+    private fun aktualizaciaAktivityPendingIntent(): android.app.PendingIntent {
+        val flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                android.app.PendingIntent.FLAG_MUTABLE
+            } else {
+                0
+            }
+        return android.app.PendingIntent.getBroadcast(
+            this,
+            1,
+            Intent(this, RozpoznavanieAktivityReceiver::class.java)
+                .setAction(RozpoznavanieAktivityReceiver.AKCIA_AKTUALIZACIA_AKTIVITY),
+            flags,
+        )
     }
 
     private fun staryPendingIntent(): android.app.PendingIntent? {
@@ -316,5 +348,9 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         odregistrovatPrijimac()
         super.onDestroy()
+    }
+
+    private companion object {
+        const val INTERVAL_AKTUALIZACIE_AKTIVITY_MILLIS = 30_000L
     }
 }

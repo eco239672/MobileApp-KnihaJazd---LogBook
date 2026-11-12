@@ -44,16 +44,25 @@ class GpsSledovanieService : Service() {
     private var pocetBodov = 0
     private var prejdeneMetre = 0.0
     private var poslednyPohybMillis: Long? = null
+    private var spusteneSledovanieMillis = 0L
     private var sleduje = false
     private var ukonceneZamerne = false
 
     private val kontrolaZastavenia = object : Runnable {
         override fun run() {
             val poslednyPohyb = poslednyPohybMillis
-            if (sleduje && poslednyPohyb != null &&
-                System.currentTimeMillis() - poslednyPohyb >= CAS_ZASTAVENIA_MILLIS
+            val teraz = System.currentTimeMillis()
+            if (sleduje && prvyBod == null &&
+                teraz - spusteneSledovanieMillis >= CAS_CAKANIA_NA_POHYB_MILLIS
             ) {
-                dokoncitJazdu()
+                ukoncitSledovaniePreNecinnost()
+                return
+            }
+            if (sleduje && poslednyPohyb != null &&
+                teraz - poslednyPohyb >= CAS_ZASTAVENIA_MILLIS
+            ) {
+                ukoncitSledovaniePreNecinnost()
+                return
             }
             if (sleduje) handler.postDelayed(this, INTERVAL_KONTROLY_MILLIS)
         }
@@ -127,6 +136,7 @@ class GpsSledovanieService : Service() {
             return
         }
         obnovitStavJazdy()
+        spusteneSledovanieMillis = System.currentTimeMillis()
 
         vytvoritKanalNotifikacie()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -203,7 +213,17 @@ class GpsSledovanieService : Service() {
         pocetBodov = 0
         prejdeneMetre = 0.0
         poslednyPohybMillis = null
-        if (sleduje) ulozitStavSledovania()
+    }
+
+    private fun ukoncitSledovaniePreNecinnost() {
+        dokoncitJazdu()
+        ukonceneZamerne = true
+        vymazatStavSledovania()
+        getSharedPreferences(RozpoznavanieAktivityReceiver.PREFERENCIE, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(RozpoznavanieAktivityReceiver.KLUC_V_AUTE, false)
+            .apply()
+        stopSelf()
     }
 
     private fun ulozitStavSledovania() {
@@ -349,6 +369,7 @@ class GpsSledovanieService : Service() {
         private const val RYCHLOST_POHYB_METRE_ZA_SEKUNDU = 3 / 3f
         private const val MAXIMALNA_PRESNOST_METRE = 35f
         private const val CAS_ZASTAVENIA_MILLIS = 20 * 60 * 1_000L
+        private const val CAS_CAKANIA_NA_POHYB_MILLIS = 5 * 60 * 1_000L
         private const val INTERVAL_KONTROLY_MILLIS = 30_000L
         private const val MAX_DOKONCENYCH_JAZD = 50
 
