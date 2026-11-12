@@ -70,7 +70,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   var _vybranaZalozka = 0;
   final List<Jazda> _jazdy = [];
   late final StreamSubscription<DokoncenaGpsJazda> _dokoncenaJazda;
-  late final StreamSubscription<bool> _stavVozidla;
+  late final StreamSubscription<UdalostRozpoznavaniaAktivity> _udalostAktivity;
 
   late DateTime _vybranyDatum;
   var _nacitavaUdaje = true;
@@ -88,8 +88,8 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     _dokoncenaJazda = _gpsTracking.dokonceneJazdy.listen(
       _ulozitAutomatickuJazdu,
     );
-    _stavVozidla = _rozpoznavanieAktivity.stavVozidla.listen(
-      _spracovatStavVozidla,
+    _udalostAktivity = _rozpoznavanieAktivity.udalosti.listen(
+      _spracovatUdalostAktivity,
     );
     _inicializovatAplikaciu();
   }
@@ -145,7 +145,15 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     }
   }
 
-  Future<void> _spracovatStavVozidla(bool vAute) async {
+  Future<void> _spracovatUdalostAktivity(
+    UdalostRozpoznavaniaAktivity udalost,
+  ) async {
+    if (udalost.gpsJazdaDokoncena) {
+      await _preniestDokonceneJazdyZOzadia();
+      return;
+    }
+    final vAute = udalost.vAute;
+    if (vAute == null) return;
     if (_pouzivaAndroidPozadie) return;
     if (vAute) {
       await _spustitAutomatickeSledovanie();
@@ -165,7 +173,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   @override
   void dispose() {
     _dokoncenaJazda.cancel();
-    _stavVozidla.cancel();
+    _udalostAktivity.cancel();
     _gpsTracking
       ..removeListener(_obnovitGpsStav)
       ..dispose();

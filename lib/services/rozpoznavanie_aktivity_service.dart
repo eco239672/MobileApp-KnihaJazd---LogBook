@@ -14,9 +14,14 @@ class RozpoznavanieAktivityService {
     'sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity_udalosti',
   );
 
-  Stream<bool> get stavVozidla => _udalosti.receiveBroadcastStream().map(
-    (udalost) => (udalost as Map)['vAute'] == true,
-  );
+  Stream<UdalostRozpoznavaniaAktivity> get udalosti =>
+      _udalosti.receiveBroadcastStream().map((udalost) {
+        final hodnoty = Map<Object?, Object?>.from(udalost as Map);
+        return UdalostRozpoznavaniaAktivity(
+          vAute: hodnoty['vAute'] as bool?,
+          gpsJazdaDokoncena: hodnoty['gpsJazdaDokoncena'] == true,
+        );
+      });
 
   Future<StavRozpoznavaniaAktivity> zistitStav() async {
     final odpoved = await _kanal.invokeMapMethod<String, dynamic>('stav');
@@ -55,4 +60,14 @@ class StavRozpoznavaniaAktivity {
   final bool aktivne;
   final bool vAute;
   final bool polohaNaPozadiPovolena;
+}
+
+class UdalostRozpoznavaniaAktivity {
+  const UdalostRozpoznavaniaAktivity({
+    required this.vAute,
+    required this.gpsJazdaDokoncena,
+  });
+
+  final bool? vAute;
+  final bool gpsJazdaDokoncena;
 }

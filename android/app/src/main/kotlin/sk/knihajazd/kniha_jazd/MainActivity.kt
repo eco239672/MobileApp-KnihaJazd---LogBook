@@ -30,15 +30,21 @@ class MainActivity : FlutterActivity() {
 
     private val prijimacStavu = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action != RozpoznavanieAktivityReceiver.AKCIA_STAV_AKTIVITY) return
-            eventSink?.success(
-                mapOf(
-                    "vAute" to intent.getBooleanExtra(
-                        RozpoznavanieAktivityReceiver.EXTRA_V_AUTE,
-                        false,
-                    ),
-                ),
-            )
+            when (intent.action) {
+                RozpoznavanieAktivityReceiver.AKCIA_STAV_AKTIVITY -> {
+                    eventSink?.success(
+                        mapOf(
+                            "vAute" to intent.getBooleanExtra(
+                                RozpoznavanieAktivityReceiver.EXTRA_V_AUTE,
+                                false,
+                            ),
+                        ),
+                    )
+                }
+                GpsSledovanieService.AKCIA_JAZDA_DOKONCENA -> {
+                    eventSink?.success(mapOf("gpsJazdaDokoncena" to true))
+                }
+            }
         }
     }
 
@@ -289,7 +295,10 @@ class MainActivity : FlutterActivity() {
 
     private fun zaregistrovatPrijimac() {
         if (prijimacZaregistrovany) return
-        val filter = IntentFilter(RozpoznavanieAktivityReceiver.AKCIA_STAV_AKTIVITY)
+        val filter = IntentFilter().apply {
+            addAction(RozpoznavanieAktivityReceiver.AKCIA_STAV_AKTIVITY)
+            addAction(GpsSledovanieService.AKCIA_JAZDA_DOKONCENA)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(prijimacStavu, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {

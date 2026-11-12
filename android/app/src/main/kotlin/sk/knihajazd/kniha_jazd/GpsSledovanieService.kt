@@ -272,6 +272,11 @@ class GpsSledovanieService : Service() {
         // o dokončených jazdách viac než zanedbateľné miesto v telefóne.
         while (jazdy.length() > MAX_DOKONCENYCH_JAZD) jazdy.remove(0)
         preferencie.edit().putString(KLUC_DOKONCENE_JAZDY, jazdy.toString()).apply()
+        // Ak je aplikácia práve otvorená, môže nový záznam hneď preniesť do
+        // lokálnej databázy a zobraziť ho bez potreby jej opätovného otvorenia.
+        sendBroadcast(
+            Intent(AKCIA_JAZDA_DOKONCENA).setPackage(packageName),
+        )
     }
 
     private fun vytvoritKanalNotifikacie() {
@@ -331,6 +336,7 @@ class GpsSledovanieService : Service() {
         const val AKCIA_SPUSTIT = "sk.knihajazd.kniha_jazd.SPUSTIT_GPS_SLEDOVANIE"
         const val AKCIA_ZASTAVIT = "sk.knihajazd.kniha_jazd.ZASTAVIT_GPS_SLEDOVANIE"
         const val AKCIA_SPRACOVAT_AKTIVITU = "sk.knihajazd.kniha_jazd.SPRACOVAT_AKTIVITU"
+        const val AKCIA_JAZDA_DOKONCENA = "sk.knihajazd.kniha_jazd.GPS_JAZDA_DOKONCENA"
         const val PREFERENCIE_DOKONCENE_JAZDY = "dokoncene_gps_jazdy"
         const val KLUC_DOKONCENE_JAZDY = "jazdy"
         private const val PREFERENCIE_STAV_SLEDOVANIA = "stav_gps_sledovania"
