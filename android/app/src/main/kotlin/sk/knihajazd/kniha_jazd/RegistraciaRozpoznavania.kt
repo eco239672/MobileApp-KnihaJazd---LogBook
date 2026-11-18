@@ -63,15 +63,21 @@ object RegistraciaRozpoznavania {
                         )
                             .addOnSuccessListener {
                                 nastavitZapnute(aplikacia, true)
+                                Diagnostika.zapisat(aplikacia, "Rozpoznávanie jazdy zaregistrované")
                                 onHotovo(null)
                             }
                             .addOnFailureListener { chyba ->
                                 klient.removeActivityTransitionUpdates(pendingIntent(aplikacia))
+                                Diagnostika.zapisat(aplikacia, "Registrácia odhadov ZLYHALA: ${Diagnostika.popisChyby(chyba)}")
                                 onHotovo(chyba)
                             }
                     }
-                    .addOnFailureListener { chyba -> onHotovo(chyba) }
+                    .addOnFailureListener { chyba ->
+                        Diagnostika.zapisat(aplikacia, "Registrácia prechodov ZLYHALA: ${Diagnostika.popisChyby(chyba)}")
+                        onHotovo(chyba)
+                    }
             } catch (chyba: SecurityException) {
+                Diagnostika.zapisat(aplikacia, "Registrácia ZLYHALA: ${Diagnostika.popisChyby(chyba)}")
                 onHotovo(chyba)
             }
         }
@@ -91,6 +97,7 @@ object RegistraciaRozpoznavania {
         val aplikacia = context.applicationContext
         val klient = ActivityRecognition.getClient(aplikacia)
         nastavitZapnute(aplikacia, false)
+        Diagnostika.zapisat(aplikacia, "Automatické sledovanie vypnuté používateľom")
         klient.removeActivityTransitionUpdates(pendingIntent(aplikacia))
             .addOnCompleteListener {
                 klient.removeActivityUpdates(aktualizaciaAktivityPendingIntent(aplikacia))

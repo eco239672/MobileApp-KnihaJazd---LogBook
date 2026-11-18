@@ -49,3 +49,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Diagnostické výpisy z telefónu (adb logcat, dumpsys)
+diag_*.txt

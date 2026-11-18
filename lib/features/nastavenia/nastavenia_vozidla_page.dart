@@ -6,6 +6,7 @@ import '../../models/nastavenia_vozidla.dart';
 import '../../services/cloudova_synchronizacia.dart';
 import '../../services/rozpoznavanie_aktivity_service.dart';
 import '../../utils/decimalny_vstup.dart';
+import 'diagnostika_page.dart';
 
 class NastaveniaVozidlaPage extends StatefulWidget {
   const NastaveniaVozidlaPage({
@@ -14,6 +15,9 @@ class NastaveniaVozidlaPage extends StatefulWidget {
     required this.onPovolitRozpoznavanie,
     required this.onVypnutRozpoznavanie,
     required this.onObnovitRozpoznavanie,
+    required this.onPovolitNotifikacie,
+    required this.onNacitatDiagnostiku,
+    required this.onVymazatDiagnostiku,
     required this.onZistitStavRozpoznavania,
     required this.onOtvoritNastaveniaPolohy,
     required this.cloudovyUcet,
@@ -31,6 +35,9 @@ class NastaveniaVozidlaPage extends StatefulWidget {
 
   /// Tichá obnova registrácie bez systémových dialógov (po návrate do aplikácie).
   final Future<StavRozpoznavaniaAktivity> Function() onObnovitRozpoznavanie;
+  final Future<StavRozpoznavaniaAktivity> Function() onPovolitNotifikacie;
+  final Future<String> Function() onNacitatDiagnostiku;
+  final Future<void> Function() onVymazatDiagnostiku;
   final Future<StavRozpoznavaniaAktivity> Function() onZistitStavRozpoznavania;
   final Future<void> Function() onOtvoritNastaveniaPolohy;
   final CloudovyUcet? cloudovyUcet;
@@ -221,6 +228,26 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     } finally {
       if (mounted) setState(() => _meniSaRozpoznavanie = false);
     }
+  }
+
+  Future<void> _povolitNotifikacie() async {
+    try {
+      final stav = await widget.onPovolitNotifikacie();
+      if (mounted) setState(() => _stavRozpoznavania = stav);
+    } catch (_) {
+      // Stav sa znova overí po návrate do aplikácie.
+    }
+  }
+
+  void _otvoritDiagnostiku() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => DiagnostikaPage(
+          onNacitat: widget.onNacitatDiagnostiku,
+          onVymazat: widget.onVymazatDiagnostiku,
+        ),
+      ),
+    );
   }
 
   Future<void> _otvoritNastaveniaPolohy() async {
@@ -541,6 +568,20 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                         : const Icon(Icons.location_on_outlined),
                     label: const Text('Otvoriť nastavenia polohy'),
                   ),
+                if (_stavRozpoznavania?.aktivne == true &&
+                    _stavRozpoznavania?.notifikaciePovolene == false) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Notifikácie sú vypnuté: počas jazdy neuvidíš, že sa jazda zaznamenáva.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _povolitNotifikacie,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Povoliť notifikácie'),
+                  ),
+                ],
                 if (_stavRozpoznavania?.aktivne == true) ...[
                   const SizedBox(height: 8),
                   TextButton.icon(
@@ -551,6 +592,12 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                     label: const Text('Vypnúť automatické sledovanie'),
                   ),
                 ],
+                const SizedBox(height: 4),
+                TextButton.icon(
+                  onPressed: _otvoritDiagnostiku,
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  label: const Text('Diagnostika sledovania'),
+                ),
               ],
             ),
           ),

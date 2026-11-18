@@ -302,6 +302,11 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
         if (ulozena) potvrdene.add(zaznam.identifikator);
       }
       await _gpsPozadie.potvrditUlozenie(potvrdene);
+      if (cakajuceJazdy.isNotEmpty) {
+        _zapisatDiagnostiku(
+          'Aplikácia preniesla ${potvrdene.length} z ${cakajuceJazdy.length} jázd do knihy jázd',
+        );
+      }
       if (potvrdene.isNotEmpty) {
         _zobrazitSpravu(
           'Automaticky sa uložilo ${potvrdene.length} ${potvrdene.length == 1 ? 'jazda' : 'jazdy'} z GPS.',
@@ -310,6 +315,13 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     } catch (_) {
       // Natívny záznam zostane v telefóne a prenesie sa pri ďalšom otvorení.
     }
+  }
+
+  void _zapisatDiagnostiku(String sprava) {
+    if (!_pouzivaAndroidPozadie) return;
+    unawaited(
+      _rozpoznavanieAktivity.zapisatDiagnostiku(sprava).catchError((Object _) {}),
+    );
   }
 
   void _obnovitGpsStav() {
@@ -377,9 +389,10 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     if (!firebaseDostupny || _cloud.aktualnyUcet == null) return;
     try {
       await _synchronizovatDoCloudu();
-    } catch (_) {
+    } catch (chyba) {
       // Zmeny ostávajú v telefóne označené na odoslanie; skúsi sa to znova
       // pri návrate do aplikácie, po ďalšej zmene alebo o 10 minút.
+      _zapisatDiagnostiku('Synchronizácia s cloudom zlyhala: ${chyba.runtimeType}');
     }
   }
 
@@ -581,6 +594,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                 onPovolitRozpoznavanie: _povolitRozpoznavanie,
                 onVypnutRozpoznavanie: _vypnutRozpoznavanie,
                 onObnovitRozpoznavanie: _obnovitRozpoznavanie,
+                onPovolitNotifikacie: _rozpoznavanieAktivity.povolitNotifikacie,
+                onNacitatDiagnostiku: _rozpoznavanieAktivity.nacitatDiagnostiku,
+                onVymazatDiagnostiku: _rozpoznavanieAktivity.vymazatDiagnostiku,
                 onZistitStavRozpoznavania: _rozpoznavanieAktivity.zistitStav,
                 onOtvoritNastaveniaPolohy: _gpsPozadie.otvoritNastaveniaPolohy,
                 cloudovyUcet: firebaseDostupny ? _cloud.aktualnyUcet : null,

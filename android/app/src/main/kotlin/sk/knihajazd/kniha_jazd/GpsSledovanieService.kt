@@ -48,6 +48,9 @@ class GpsSledovanieService : Service() {
     private var sleduje = false
     private var ukonceneZamerne = false
     private var kandidatZaciatku: Bod? = null
+    private var prijateBody = 0
+    private var odmietnuteBody = 0
+    private var zaciatokZapisany = false
 
     private val kontrolaZastavenia = object : Runnable {
         override fun run() {
@@ -56,12 +59,17 @@ class GpsSledovanieService : Service() {
             if (sleduje && prvyBod == null &&
                 teraz - spusteneSledovanieMillis >= CAS_CAKANIA_NA_POHYB_MILLIS
             ) {
+                Diagnostika.zapisat(
+                    this@GpsSledovanieService,
+                    "Koniec: 5 min žiadny rozbeh nad 12 km/h (GPS bodov: $prijateBody presných, $odmietnuteBody nepresných)",
+                )
                 ukoncitSledovaniePreNecinnost()
                 return
             }
             if (sleduje && poslednyPohyb != null &&
                 teraz - poslednyPohyb >= CAS_ZASTAVENIA_MILLIS
             ) {
+                Diagnostika.zapisat(this@GpsSledovanieService, "Koniec: 20 min bez pohybu")
                 ukoncitSledovaniePreNecinnost()
                 return
             }
@@ -84,6 +92,7 @@ class GpsSledovanieService : Service() {
         // checks, restoring state, or creating the location request first can
         // exceed that deadline and Android kills the service before a return
         // journey can be recorded.
+        Diagnostika.zapisat(this, "Služba: príkaz ${popisAkcie(intent?.action)}")
         if (!ensureForegroundNotification()) {
             // Bez povolenia polohy (Android 14+) alebo keď systém nepovolí
             // spustenie na popredí, by služba padala stále dokola cez
@@ -125,6 +134,10 @@ class GpsSledovanieService : Service() {
         for (udalost in vysledok.transitionEvents) {
             if (udalost.activityType != DetectedActivity.IN_VEHICLE) continue
             val vAute = udalost.transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER
+            Diagnostika.zapisat(
+                this,
+                "Prechod: ${if (vAute) "nastúpil do auta" else "vystúpil z auta"}",
+            )
             getSharedPreferences(RozpoznavanieAktivityReceiver.PREFERENCIE, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(RozpoznavanieAktivityReceiver.KLUC_V_AUTE, vAute)
@@ -152,12 +165,14 @@ class GpsSledovanieService : Service() {
     private fun spustitSledovanie() {
         if (sleduje) return
         if (!maPovoleniePolohyNaPozadi(this)) {
+            Diagnostika.zapisat(this, "Sledovanie nespustené: chýba presná poloha alebo poloha na pozadí")
             ukonceneZamerne = true
             vymazatStavSledovania()
             stopSelf()
             return
         }
         obnovitStavJazdy()
+        zaciatokZapisany = prvyBod != null
         spusteneSledovanieMillis = System.currentTimeMillis()
 
         val poziadavka = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000)
@@ -169,7 +184,12 @@ class GpsSledovanieService : Service() {
             ukonceneZamerne = false
             ulozitStavSledovania()
             handler.post(kontrolaZastavenia)
-        } catch (_: SecurityException) {
+            Diagnostika.zapisat(
+                this,
+                if (prvyBod == null) "GPS sledovanie beží, čakám na rozbeh" else "GPS sledovanie pokračuje v rozpracovanej jazde",
+            )
+        } catch (chyba: SecurityException) {
+            Diagnostika.zapisat(this, "GPS odmietnuté: ${Diagnostika.popisChyby(chyba)}")
             ukonceneZamerne = true
             vymazatStavSledovania()
             stopSelf()
@@ -177,10 +197,13 @@ class GpsSledovanieService : Service() {
     }
 
     private fun spracovatPolohu(poloha: Location) {
-        if (!sleduje || !poloha.hasAccuracy() || poloha.accuracy > MAXIMALNA_PRESNOST_METRE) {
+        if (!sleduje) return
+        if (!poloha.hasAccuracy() || poloha.accuracy > MAXIMALNA_PRESNOST_METRE) {
+            odmietnuteBody += 1
             return
         }
 
+        prijateBody += 1
         val rychlost = if (poloha.hasSpeed() && poloha.speed > 0) poloha.speed else 0f
         val novyBod = Bod(
             latitude = poloha.latitude,
@@ -226,6 +249,13 @@ class GpsSledovanieService : Service() {
         } else {
             prvyBod = novyBod
         }
+        if (!zaciatokZapisany) {
+            zaciatokZapisany = true
+            Diagnostika.zapisat(
+                this,
+                "Jazda začala (rýchlosť ${(rychlost * 3.6f).toInt()} km/h, presnosť ${poloha.accuracy.toInt()} m)",
+            )
+        }
         poslednyBod = novyBod
         pocetBodov += 1
         if (rychlost >= RYCHLOST_POHYB_METRE_ZA_SEKUNDU) {
@@ -239,6 +269,13 @@ class GpsSledovanieService : Service() {
         val koniec = poslednyBod
         if (zaciatok != null && koniec != null && pocetBodov >= 2) {
             ulozitDokoncenuJazdu(zaciatok, koniec, prejdeneMetre)
+            Diagnostika.zapisat(
+                this,
+                "Jazda uložená: ${"%.1f".format(prejdeneMetre / 1000)} km, $pocetBodov bodov, " +
+                    "${(koniec.casMillis - zaciatok.casMillis) / 60_000} min",
+            )
+        } else if (pocetBodov > 0) {
+            Diagnostika.zapisat(this, "Jazda zahodená: len $pocetBodov GPS bod(ov)")
         }
         prvyBod = null
         poslednyBod = null
@@ -246,6 +283,7 @@ class GpsSledovanieService : Service() {
         prejdeneMetre = 0.0
         poslednyPohybMillis = null
         kandidatZaciatku = null
+        zaciatokZapisany = false
     }
 
     private fun ukoncitSledovaniePreNecinnost() {
@@ -298,6 +336,7 @@ class GpsSledovanieService : Service() {
         if (posledny != null &&
             System.currentTimeMillis() - posledny.casMillis >= CAS_ZASTAVENIA_MILLIS
         ) {
+            Diagnostika.zapisat(this, "Starší nedokončený záznam uzavretý ako samostatná jazda")
             dokoncitJazdu()
         }
     }
@@ -370,11 +409,13 @@ class GpsSledovanieService : Service() {
                 startForeground(ID_NOTIFIKACIE, notifikacia())
             }
             true
-        } catch (_: SecurityException) {
+        } catch (chyba: SecurityException) {
             // Android 14+: chýba povolenie polohy pre službu typu „location“.
+            Diagnostika.zapisat(this, "Služba na popredí ODMIETNUTÁ: ${Diagnostika.popisChyby(chyba)}")
             false
-        } catch (_: IllegalStateException) {
+        } catch (chyba: IllegalStateException) {
             // Android 12+: ForegroundServiceStartNotAllowedException.
+            Diagnostika.zapisat(this, "Služba na popredí ODMIETNUTÁ: ${Diagnostika.popisChyby(chyba)}")
             false
         }
     }
@@ -396,6 +437,7 @@ class GpsSledovanieService : Service() {
     }
 
     override fun onDestroy() {
+        Diagnostika.zapisat(this, if (ukonceneZamerne) "Služba ukončená" else "Služba ukončená systémom (obnoví sa)")
         handler.removeCallbacks(kontrolaZastavenia)
         klient.removeLocationUpdates(polohaCallback)
         // Pri neočakávanom ukončení nevytvárame skrátenú jazdu. Služba sa cez
@@ -403,6 +445,14 @@ class GpsSledovanieService : Service() {
         if (!ukonceneZamerne && sleduje) ulozitStavSledovania()
         sleduje = false
         super.onDestroy()
+    }
+
+    private fun popisAkcie(akcia: String?): String = when (akcia) {
+        AKCIA_SPUSTIT -> "spustiť"
+        AKCIA_ZASTAVIT -> "zastaviť"
+        AKCIA_SPRACOVAT_AKTIVITU -> "udalosť auta"
+        null -> "obnovenie po ukončení systémom"
+        else -> akcia
     }
 
     private data class Bod(

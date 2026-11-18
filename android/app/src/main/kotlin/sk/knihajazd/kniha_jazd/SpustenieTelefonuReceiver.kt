@@ -21,6 +21,10 @@ class SpustenieTelefonuReceiver : BroadcastReceiver() {
         ) {
             return
         }
+        Diagnostika.zapisat(
+            context,
+            if (intent.action == Intent.ACTION_BOOT_COMPLETED) "Telefón reštartovaný, obnovujem rozpoznávanie" else "Aplikácia aktualizovaná, obnovujem rozpoznávanie",
+        )
         val cakajuciVysledok = goAsync()
         RegistraciaRozpoznavania.zaregistrovat(context) { cakajuciVysledok.finish() }
     }

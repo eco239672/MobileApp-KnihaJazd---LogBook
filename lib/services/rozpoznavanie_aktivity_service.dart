@@ -30,6 +30,8 @@ class RozpoznavanieAktivityService {
       aktivne: odpoved?['aktivne'] == true,
       vAute: odpoved?['vAute'] == true,
       polohaNaPozadiPovolena: odpoved?['polohaNaPozadiPovolena'] == true,
+      // Staršia natívna časť túto hodnotu nemusí poslať: vtedy nič nehlásime.
+      notifikaciePovolene: odpoved?['notifikaciePovolene'] != false,
     );
   }
 
@@ -46,6 +48,23 @@ class RozpoznavanieAktivityService {
       _kanal.invokeMethod<void>('obnovitAkJeAktivne');
 
   Future<void> zastavit() => _kanal.invokeMethod<void>('zastavit');
+
+  /// Vypýta povolenie notifikácií, prípadne otvorí ich nastavenia.
+  Future<StavRozpoznavaniaAktivity> povolitNotifikacie() async {
+    await _kanal.invokeMethod<bool>('povolitNotifikacie');
+    return zistitStav();
+  }
+
+  // --- diagnostický záznam (ukladá ho natívna časť v telefóne) ---
+
+  Future<String> nacitatDiagnostiku() async =>
+      await _kanal.invokeMethod<String>('nacitatDiagnostiku') ?? '';
+
+  Future<void> vymazatDiagnostiku() =>
+      _kanal.invokeMethod<void>('vymazatDiagnostiku');
+
+  Future<void> zapisatDiagnostiku(String sprava) =>
+      _kanal.invokeMethod<void>('zapisatDiagnostiku', sprava);
 }
 
 class StavRozpoznavaniaAktivity {
@@ -54,12 +73,14 @@ class StavRozpoznavaniaAktivity {
     required this.aktivne,
     required this.vAute,
     required this.polohaNaPozadiPovolena,
+    this.notifikaciePovolene = true,
   });
 
   final bool povolene;
   final bool aktivne;
   final bool vAute;
   final bool polohaNaPozadiPovolena;
+  final bool notifikaciePovolene;
 }
 
 class UdalostRozpoznavaniaAktivity {

@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -19,9 +20,11 @@ class MainActivity : FlutterActivity() {
     private val methodChannelName = "sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity"
     private val eventChannelName = "sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity_udalosti"
     private val requestPovolenia = 481
+    private val requestNotifikacie = 482
 
     private var eventSink: EventChannel.EventSink? = null
     private var cakajuciVysledokPovolenia: MethodChannel.Result? = null
+    private var cakajuciVysledokNotifikacii: MethodChannel.Result? = null
     private var prijimacZaregistrovany = false
 
     private val prijimacStavu = object : BroadcastReceiver() {
@@ -61,6 +64,16 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "otvoritNastaveniaPolohy" -> otvoritNastaveniaPolohy(result)
+                    "povolitNotifikacie" -> povolitNotifikacie(result)
+                    "nacitatDiagnostiku" -> result.success(Diagnostika.nacitat(this))
+                    "vymazatDiagnostiku" -> {
+                        Diagnostika.vymazat(this)
+                        result.success(null)
+                    }
+                    "zapisatDiagnostiku" -> {
+                        call.arguments<String>()?.let { Diagnostika.zapisat(this, it) }
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -92,6 +105,7 @@ class MainActivity : FlutterActivity() {
                 false,
             ),
             "polohaNaPozadiPovolena" to GpsSledovanieService.maPovoleniePolohyNaPozadi(this),
+            "notifikaciePovolene" to NotificationManagerCompat.from(this).areNotificationsEnabled(),
         )
     }
 
@@ -196,12 +210,48 @@ class MainActivity : FlutterActivity() {
         spustitRozpoznavanie(result)
     }
 
+    /**
+     * Notifikácia počas jazdy ukazuje, že sledovanie beží. Ak už systém dialóg
+     * nezobrazí (používateľ ho dvakrát zamietol), otvorí nastavenia notifikácií.
+     */
+    private fun povolitNotifikacie(result: MethodChannel.Result) {
+        if (NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            result.success(true)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            cakajuciVysledokNotifikacii = result
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), requestNotifikacie)
+            return
+        }
+        otvoritNastaveniaNotifikacii()
+        result.success(false)
+    }
+
+    private fun otvoritNastaveniaNotifikacii() {
+        startActivity(
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
+        )
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == requestNotifikacie) {
+            val vysledok = cakajuciVysledokNotifikacii ?: return
+            cakajuciVysledokNotifikacii = null
+            val povolene = NotificationManagerCompat.from(this).areNotificationsEnabled()
+            if (!povolene) otvoritNastaveniaNotifikacii()
+            vysledok.success(povolene)
+            return
+        }
         if (requestCode != requestPovolenia) return
 
         val result = cakajuciVysledokPovolenia ?: return
