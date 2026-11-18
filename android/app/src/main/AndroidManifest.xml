@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Android 13+: bez neho sa notifikácia GPS sledovania nezobrazí. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Po reštarte telefónu treba znova zaregistrovať rozpoznávanie jazdy. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:label="Kniha jázd – Drive Log Cloud"
@@ -35,6 +39,14 @@
         <receiver
             android:name=".RozpoznavanieAktivityReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".SpustenieTelefonuReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".GpsSledovanieService"
             android:exported="false"

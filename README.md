@@ -39,9 +39,21 @@ users/{uid}/jazdy/{cloudTripId}
 users/{uid}/profil/vozidlo
 ```
 
-The app keeps the SQLite database on the phone as the primary offline store.
-When a signed-in user saves a trip or vehicle settings, it also attempts a
-cloud sync. A manual sync button is available in Settings.
+The app keeps the SQLite database on the phone as the primary, permanent store
+(trips are kept for years, e.g. for tax records). Firestore is the backup and the
+way to share data between devices; its own offline cache is disabled.
+
+Synchronization (when signed in):
+
+- runs on app start, when the app returns to the foreground, after every change
+  and every 10 minutes while the app is open; a manual button is in Settings;
+- downloads only documents changed since the last download (`aktualizovane`,
+  server time, with a 5-minute overlap), then uploads only local changes
+  (`odoslane = 0` in SQLite);
+- conflicts: the newer edit wins (`upravene`, device time in ms);
+- deleting a trip keeps a tombstone (`vymazane: true`) in Firestore so other
+  devices delete it too; locally the row is removed once the deletion is uploaded;
+- without a connection, changes stay marked in SQLite and are sent later.
 
 ## Next step
 

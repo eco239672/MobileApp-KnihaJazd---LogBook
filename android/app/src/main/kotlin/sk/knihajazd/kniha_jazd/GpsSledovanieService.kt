@@ -47,6 +47,7 @@ class GpsSledovanieService : Service() {
     private var spusteneSledovanieMillis = 0L
     private var sleduje = false
     private var ukonceneZamerne = false
+    private var kandidatZaciatku: Bod? = null
 
     private val kontrolaZastavenia = object : Runnable {
         override fun run() {
@@ -77,6 +78,23 @@ class GpsSledovanieService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Android gives a service started from a BroadcastReceiver only a few
+        // seconds to become a foreground service. Activity recognition often
+        // wakes the process cold while the phone is locked, so doing permission
+        // checks, restoring state, or creating the location request first can
+        // exceed that deadline and Android kills the service before a return
+        // journey can be recorded.
+        if (!ensureForegroundNotification()) {
+            // Bez povolenia polohy (Android 14+) alebo keď systém nepovolí
+            // spustenie na popredí, by služba padala stále dokola cez
+            // START_STICKY. Rozpracovanú jazdu radšej uložíme a skončíme.
+            if (!sleduje) obnovitStavJazdy()
+            dokoncitJazdu()
+            ukonceneZamerne = true
+            vymazatStavSledovania()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             AKCIA_SPUSTIT -> spustitSledovanie()
             AKCIA_SPRACOVAT_AKTIVITU -> spracovatRozpoznanieAktivity(intent)
@@ -123,8 +141,12 @@ class GpsSledovanieService : Service() {
                 ukonceneZamerne = true
                 vymazatStavSledovania()
                 stopSelf()
+                return
             }
         }
+        // Žiadna udalosť „v aute“: služba nemá čo robiť a nesmie zostať
+        // visieť na popredí s notifikáciou.
+        if (!sleduje) stopSelf()
     }
 
     private fun spustitSledovanie() {
@@ -137,17 +159,6 @@ class GpsSledovanieService : Service() {
         }
         obnovitStavJazdy()
         spusteneSledovanieMillis = System.currentTimeMillis()
-
-        vytvoritKanalNotifikacie()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                ID_NOTIFIKACIE,
-                notifikacia(),
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
-            )
-        } else {
-            startForeground(ID_NOTIFIKACIE, notifikacia())
-        }
 
         val poziadavka = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000)
             .setMinUpdateDistanceMeters(10f)
@@ -171,8 +182,6 @@ class GpsSledovanieService : Service() {
         }
 
         val rychlost = if (poloha.hasSpeed() && poloha.speed > 0) poloha.speed else 0f
-        if (prvyBod == null && rychlost < RYCHLOST_START_METRE_ZA_SEKUNDU) return
-
         val novyBod = Bod(
             latitude = poloha.latitude,
             longitude = poloha.longitude,
@@ -180,6 +189,24 @@ class GpsSledovanieService : Service() {
             presnostMetre = poloha.accuracy,
             rychlostMetreZaSekundu = rychlost,
         )
+
+        if (prvyBod == null) {
+            if (rychlost < RYCHLOST_START_METRE_ZA_SEKUNDU) {
+                // Zapamätáme si miesto pred rozbehom, aby jazde nechýbal úvodný úsek.
+                kandidatZaciatku = novyBod
+                return
+            }
+            val kandidat = kandidatZaciatku
+            kandidatZaciatku = null
+            if (kandidat != null &&
+                novyBod.casMillis - kandidat.casMillis in 0..MAX_VEK_ZACIATKU_MILLIS
+            ) {
+                prvyBod = kandidat
+                poslednyBod = kandidat
+                pocetBodov = 1
+            }
+        }
+
         val predchadzajuciBod = poslednyBod
         if (predchadzajuciBod != null) {
             val vzdialenost = FloatArray(1)
@@ -190,6 +217,11 @@ class GpsSledovanieService : Service() {
                 novyBod.longitude,
                 vzdialenost,
             )
+            // Pri státí GPS „poskakuje“ v rámci svojej nepresnosti. Takéto
+            // skoky nepripočítavame, inak by zápcha pridávala kilometre.
+            val stoji = rychlost < RYCHLOST_POHYB_METRE_ZA_SEKUNDU &&
+                vzdialenost[0] < maxOf(novyBod.presnostMetre, predchadzajuciBod.presnostMetre)
+            if (stoji) return
             prejdeneMetre += vzdialenost[0]
         } else {
             prvyBod = novyBod
@@ -213,6 +245,7 @@ class GpsSledovanieService : Service() {
         pocetBodov = 0
         prejdeneMetre = 0.0
         poslednyPohybMillis = null
+        kandidatZaciatku = null
     }
 
     private fun ukoncitSledovaniePreNecinnost() {
@@ -258,6 +291,14 @@ class GpsSledovanieService : Service() {
             stav.optLong("poslednyPohybMillis")
         } else {
             null
+        }
+        // Starý rozpracovaný záznam (napr. po reštarte telefónu) uzavrieme ako
+        // samostatnú jazdu, aby sa nespojil s novou jazdou o niekoľko hodín neskôr.
+        val posledny = poslednyBod
+        if (posledny != null &&
+            System.currentTimeMillis() - posledny.casMillis >= CAS_ZASTAVENIA_MILLIS
+        ) {
+            dokoncitJazdu()
         }
     }
 
@@ -309,6 +350,33 @@ class GpsSledovanieService : Service() {
             description = "Zobrazuje sa počas automatického GPS sledovania jazdy."
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(kanal)
+    }
+
+    /**
+     * Must run as the first operation of [onStartCommand]. Keeping it separate
+     * makes every service entry point (manual start, activity transition, and
+     * sticky restart) meet Android's foreground-service deadline.
+     */
+    private fun ensureForegroundNotification(): Boolean {
+        vytvoritKanalNotifikacie()
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    ID_NOTIFIKACIE,
+                    notifikacia(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+                )
+            } else {
+                startForeground(ID_NOTIFIKACIE, notifikacia())
+            }
+            true
+        } catch (_: SecurityException) {
+            // Android 14+: chýba povolenie polohy pre službu typu „location“.
+            false
+        } catch (_: IllegalStateException) {
+            // Android 12+: ForegroundServiceStartNotAllowedException.
+            false
+        }
     }
 
     private fun notifikacia(): Notification {
@@ -365,13 +433,19 @@ class GpsSledovanieService : Service() {
 
         private const val KANAL_NOTIFIKACIE = "gps_sledovanie_jazd"
         private const val ID_NOTIFIKACIE = 742
-        private const val RYCHLOST_START_METRE_ZA_SEKUNDU = 12 / 3f
-        private const val RYCHLOST_POHYB_METRE_ZA_SEKUNDU = 3 / 3f
+        private const val RYCHLOST_START_METRE_ZA_SEKUNDU = 12 / 3.6f
+        private const val RYCHLOST_POHYB_METRE_ZA_SEKUNDU = 3 / 3.6f
         private const val MAXIMALNA_PRESNOST_METRE = 35f
         private const val CAS_ZASTAVENIA_MILLIS = 20 * 60 * 1_000L
         private const val CAS_CAKANIA_NA_POHYB_MILLIS = 5 * 60 * 1_000L
         private const val INTERVAL_KONTROLY_MILLIS = 30_000L
         private const val MAX_DOKONCENYCH_JAZD = 50
+        // Posledná poloha pred rozbehom sa použije ako začiatok jazdy, ak je čerstvá.
+        private const val MAX_VEK_ZACIATKU_MILLIS = 3 * 60 * 1_000L
+
+        fun maRozpracovaneSledovanie(context: Context): Boolean =
+            context.getSharedPreferences(PREFERENCIE_STAV_SLEDOVANIA, Context.MODE_PRIVATE)
+                .getBoolean(KLUC_SLEDOVANIE_AKTIVNE, false)
 
         fun maPovoleniePolohyNaPozadi(context: Context): Boolean {
             val maPresnuPolohu = ContextCompat.checkSelfPermission(

@@ -134,12 +134,21 @@ class GpsTrackingService extends ChangeNotifier {
 
     if (_body.isNotEmpty) {
       final poslednyBod = _body.last;
-      _prejdeneMetre += Geolocator.distanceBetween(
+      final vzdialenost = Geolocator.distanceBetween(
         poslednyBod.latitude,
         poslednyBod.longitude,
         novyBod.latitude,
         novyBod.longitude,
       );
+      // Pri státí GPS „poskakuje“ v rámci nepresnosti; tieto skoky nie sú jazda.
+      final presnost = novyBod.presnostMetre > poslednyBod.presnostMetre
+          ? novyBod.presnostMetre
+          : poslednyBod.presnostMetre;
+      if (novyBod.rychlostMetreZaSekundu < _rychlostPohybMetreZaSekundu &&
+          vzdialenost < presnost) {
+        return;
+      }
+      _prejdeneMetre += vzdialenost;
     }
 
     _body.add(novyBod);

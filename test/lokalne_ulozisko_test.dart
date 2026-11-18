@@ -98,4 +98,32 @@ void main() {
     expect(nacitane.jazdy, hasLength(1));
     expect(nacitane.jazdy.single.odkial, 'Nitra');
   });
+
+  test('tú istú jazdu (rovnaké cloud ID) uloží iba raz', () async {
+    final priecinok = await Directory.systemTemp.createTemp('kniha_jazd_dup_');
+    final cesta = path.join(priecinok.path, 'kniha_jazd.db');
+    final ulozisko = SqliteLokalneUlozisko(databazovaCesta: cesta);
+    addTearDown(() async {
+      await ulozisko.zavriet();
+      await deleteDatabase(cesta);
+      await priecinok.delete(recursive: true);
+    });
+
+    final jazda = Jazda(
+      cloudId: 'gps-123',
+      datum: DateTime(2026, 11, 10, 8, 30),
+      odkial: 'Šaľa',
+      kam: 'Nitra',
+      zaciatok: '08:30',
+      koniec: '09:10',
+      kilometre: 43.7,
+      typ: TypJazdy.sluzobna,
+    );
+    final prva = await ulozisko.ulozitJazdu(jazda);
+    final druha = await ulozisko.ulozitJazdu(jazda);
+
+    final nacitane = await ulozisko.nacitat();
+    expect(nacitane.jazdy, hasLength(1));
+    expect(druha.id, prva.id);
+  });
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'features/jazdy/widgets/jazda_polozka.dart';
 import 'features/nastavenia/nastavenia_vozidla_page.dart';
 import 'models/jazda.dart';
 import 'models/nastavenia_vozidla.dart';
+import 'models/synchronizacia.dart';
 import 'models/trasa_bod.dart';
 import 'services/gps_tracking_service.dart';
 import 'services/gps_pozadie_service.dart';
@@ -20,10 +22,19 @@ import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
 import 'utils/format_datumu.dart';
 
+/// Firebase je inicializovaný len v skutočnej aplikácii (nie vo widget testoch).
+var firebaseDostupny = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     await Firebase.initializeApp();
+    // Jazdy sú trvalo uložené v SQLite v telefóne a ich odoslanie si stráži
+    // aplikácia sama. Druhá kópia dát vo vyrovnávacej pamäti Firestore je zbytočná.
+    firestore.FirebaseFirestore.instance.settings = const firestore.Settings(
+      persistenceEnabled: false,
+    );
+    firebaseDostupny = true;
   }
   runApp(const KnihaJazdApp());
 }
@@ -59,7 +70,10 @@ class KnihaJazdHomePage extends StatefulWidget {
   State<KnihaJazdHomePage> createState() => _KnihaJazdHomePageState();
 }
 
-class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
+class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
+    with WidgetsBindingObserver {
+  static const _intervalSynchronizacie = Duration(minutes: 10);
+
   final _gpsTracking = GpsTrackingService();
   final _gpsPozadie = GpsPozadieService();
   final _rozpoznavanieAktivity = RozpoznavanieAktivityService();
@@ -76,6 +90,14 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   var _nacitavaUdaje = true;
   var _exportujeExcel = false;
 
+  // Prenos jázd z natívnej služby a synchronizácia s cloudom môžu byť vyvolané
+  // viackrát naraz (štart aplikácie, udalosť „jazda dokončená“, tlačidlo).
+  // Reťazením ich spúšťame po jednom, inak by sa tá istá jazda uložila dvakrát.
+  Future<void> _poslednyPrenos = Future.value();
+  Future<void> _poslednaSynchronizacia = Future.value();
+  Timer? _casovacSynchronizacie;
+  CloudovyUcet? _ucet;
+
   CloudovaSynchronizacia get _cloud =>
       _cloudovaSynchronizacia ??= CloudovaSynchronizacia();
 
@@ -91,7 +113,24 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     _udalostAktivity = _rozpoznavanieAktivity.udalosti.listen(
       _spracovatUdalostAktivity,
     );
+    WidgetsBinding.instance.addObserver(this);
+    if (firebaseDostupny) {
+      // Kým je aplikácia otvorená, priebežne dorovnáva zmeny s cloudom.
+      _casovacSynchronizacie = Timer.periodic(
+        _intervalSynchronizacie,
+        (_) => _synchronizovatNaPozadi(),
+      );
+    }
     _inicializovatAplikaciu();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState stav) {
+    if (stav != AppLifecycleState.resumed) return;
+    // Po návrate do aplikácie prenesieme jazdy z pozadia a zálohujeme ich.
+    unawaited(
+      _preniestDokonceneJazdyZOzadia().then((_) => _synchronizovatNaPozadi()),
+    );
   }
 
   Future<void> _inicializovatAplikaciu() async {
@@ -113,6 +152,19 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     await _preniestDokonceneJazdyZOzadia();
     await _obnovitRozpoznavaniePoStarte();
     await _pripravitAutomatickeSledovanie();
+    await _pripojitCloudPoStarte();
+  }
+
+  Future<void> _pripojitCloudPoStarte() async {
+    if (!firebaseDostupny) return;
+    try {
+      final ucet = await _cloud.pockatNaPrihlasenie();
+      if (!mounted) return;
+      setState(() => _ucet = ucet);
+      if (ucet != null) await _synchronizovatNaPozadi();
+    } catch (_) {
+      // Bez cloudu aplikácia funguje ďalej; jazdy počkajú v telefóne.
+    }
   }
 
   bool get _pouzivaAndroidPozadie =>
@@ -172,6 +224,8 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _casovacSynchronizacie?.cancel();
     _dokoncenaJazda.cancel();
     _udalostAktivity.cancel();
     _gpsTracking
@@ -184,6 +238,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   Future<bool> _ulozitAutomatickuJazdu(
     DokoncenaGpsJazda jazda, {
     bool zobrazitSpravu = true,
+    String? identifikator,
   }) async {
     String miesto(TrasaBod bod) =>
         '${bod.latitude.toStringAsFixed(5)}, ${bod.longitude.toStringAsFixed(5)}';
@@ -197,12 +252,15 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
       koniec: cas(jazda.koniec.cas),
       kilometre: jazda.prejdeneMetre / 1000,
       typ: TypJazdy.sluzobna,
+      // Rovnaký záznam z GPS na pozadí má vždy rovnaké ID, takže sa nemôže
+      // uložiť dvakrát ani pri opakovanom prenose.
+      cloudId: identifikator == null ? null : 'gps-$identifikator',
     );
     try {
       final ulozenaJazda = await _ulozisko.ulozitJazdu(ukladanaJazda);
       if (!mounted) return true;
-      setState(() => _jazdy.add(ulozenaJazda));
-      await _synchronizovatNaPozadi();
+      setState(() => _vlozitAleboNahradit(ulozenaJazda));
+      unawaited(_synchronizovatNaPozadi());
     } catch (_) {
       _zobrazitSpravu('Automatickú jazdu sa nepodarilo uložiť.');
       return false;
@@ -213,7 +271,24 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     return true;
   }
 
-  Future<void> _preniestDokonceneJazdyZOzadia() async {
+  void _vlozitAleboNahradit(Jazda jazda) {
+    final index = jazda.id == null
+        ? -1
+        : _jazdy.indexWhere((polozka) => polozka.id == jazda.id);
+    if (index >= 0) {
+      _jazdy[index] = jazda;
+    } else {
+      _jazdy.add(jazda);
+    }
+  }
+
+  Future<void> _preniestDokonceneJazdyZOzadia() {
+    final dalsi = _poslednyPrenos.then((_) => _preniestDokonceneJazdyTeraz());
+    _poslednyPrenos = dalsi;
+    return dalsi;
+  }
+
+  Future<void> _preniestDokonceneJazdyTeraz() async {
     if (!_pouzivaAndroidPozadie) return;
     try {
       final cakajuceJazdy = await _gpsPozadie.nacitatDokonceneJazdy();
@@ -222,6 +297,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
         final ulozena = await _ulozitAutomatickuJazdu(
           zaznam.jazda,
           zobrazitSpravu: false,
+          identifikator: zaznam.identifikator,
         );
         if (ulozena) potvrdene.add(zaznam.identifikator);
       }
@@ -247,24 +323,48 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
 
   Future<void> _ulozitNastaveniaVozidla(NastaveniaVozidla nastavenia) async {
     await _ulozisko.ulozitNastavenia(nastavenia);
+    if (!mounted) return;
     setState(() => _nastaveniaVozidla = nastavenia);
-    await _synchronizovatNaPozadi();
+    unawaited(_synchronizovatNaPozadi());
   }
 
   Future<void> _upravitJazdu(JazdaDna upravenaJazda) async {
     final ulozenaJazda = await _ulozisko.ulozitJazdu(upravenaJazda.jazda);
     if (!mounted) return;
-    setState(() {
-      _jazdy[upravenaJazda.indexVZozname] = ulozenaJazda;
-    });
-    await _synchronizovatNaPozadi();
+    setState(() => _vlozitAleboNahradit(ulozenaJazda));
+    unawaited(_synchronizovatNaPozadi());
+  }
+
+  Future<Jazda> _pridatJazdu(Jazda jazda) async {
+    final ulozenaJazda = await _ulozisko.ulozitJazdu(jazda);
+    if (mounted) setState(() => _vlozitAleboNahradit(ulozenaJazda));
+    unawaited(_synchronizovatNaPozadi());
+    return ulozenaJazda;
+  }
+
+  Future<void> _vymazatJazdu(Jazda jazda) async {
+    await _ulozisko.vymazatJazdy([jazda]);
+    if (mounted) {
+      setState(() => _jazdy.removeWhere((polozka) => polozka.id == jazda.id));
+    }
+    // Zmazanie sa odošle do cloudu pri synchronizácii (aj neskôr, bez signálu).
+    unawaited(_synchronizovatNaPozadi());
+  }
+
+  Future<int> _vymazatVsetkyJazdy() async {
+    final vsetky = List.of(_jazdy);
+    await _ulozisko.vymazatJazdy(vsetky);
+    if (mounted) setState(_jazdy.clear);
+    // Zmazanie sa odošle do cloudu, aby sa jazdy nevrátili pri synchronizácii.
+    unawaited(_synchronizovatNaPozadi());
+    return vsetky.length;
   }
 
   Future<void> _prihlasitACSynchronizovat() async {
     try {
       final ucet = await _cloud.prihlasitCezGoogle();
       if (ucet == null || !mounted) return;
-      setState(() {});
+      setState(() => _ucet = ucet);
       await _synchronizovatDoCloudu(zobrazitVysledok: true);
     } catch (_) {
       _zobrazitSpravu(
@@ -274,35 +374,62 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
   }
 
   Future<void> _synchronizovatNaPozadi() async {
-    if (_cloudovaSynchronizacia?.aktualnyUcet == null) return;
+    if (!firebaseDostupny || _cloud.aktualnyUcet == null) return;
     try {
       await _synchronizovatDoCloudu();
     } catch (_) {
-      // Miestne uloženie je dokončené; synchronizácia sa zopakuje manuálne.
+      // Zmeny ostávajú v telefóne označené na odoslanie; skúsi sa to znova
+      // pri návrate do aplikácie, po ďalšej zmene alebo o 10 minút.
     }
   }
 
-  Future<void> _synchronizovatDoCloudu({bool zobrazitVysledok = false}) async {
-    final vysledok = await _cloud.synchronizovat(
-      jazdy: _jazdy,
-      nastavenia: _nastaveniaVozidla,
+  Future<void> _synchronizovatDoCloudu({bool zobrazitVysledok = false}) {
+    final dalsia = _poslednaSynchronizacia.then(
+      (_) => _synchronizovatDoCloudTeraz(zobrazitVysledok: zobrazitVysledok),
     );
-    final noveJazdy = <Jazda>[];
-    for (final jazda in vysledok.stiahnuteJazdy) {
-      final ulozena = await _ulozisko.ulozitJazdu(jazda);
-      noveJazdy.add(ulozena);
+    // Chyba jednej synchronizácie nesmie zablokovať ďalšie v poradí.
+    _poslednaSynchronizacia = dalsia.catchError((Object _) {});
+    return dalsia;
+  }
+
+  /// Najprv stiahne zmeny z cloudu (novšia úprava vyhráva), potom odošle
+  /// to, čo sa zmenilo v telefóne. Do cloudu ide len to, čo sa zmenilo.
+  Future<void> _synchronizovatDoCloudTeraz({
+    bool zobrazitVysledok = false,
+  }) async {
+    final stiahnute = await _cloud.stiahnutJazdy(
+      odMillis: await _ulozisko.nacitatCasStiahnutia(),
+    );
+    var zmenene = await _ulozisko.aplikovatJazdyZCloudu(stiahnute.jazdy);
+    final najnovsi = stiahnute.najnovsiCasMillis;
+    if (najnovsi != null) await _ulozisko.ulozitCasStiahnutia(najnovsi);
+
+    final vzdialeneNastavenia = await _cloud.stiahnutNastavenia();
+    if (vzdialeneNastavenia != null &&
+        await _ulozisko.aplikovatNastaveniaZCloudu(vzdialeneNastavenia)) {
+      zmenene = true;
     }
-    final vzdialeneNastavenia = vysledok.stiahnuteNastavenia;
-    if (vzdialeneNastavenia != null) {
-      await _ulozisko.ulozitNastavenia(vzdialeneNastavenia);
+
+    final neodoslaneJazdy = await _ulozisko.nacitatNeodoslaneJazdy();
+    if (neodoslaneJazdy.isNotEmpty) {
+      await _cloud.odoslatJazdy(neodoslaneJazdy);
+      await _ulozisko.oznacitOdoslane(neodoslaneJazdy);
     }
-    if (!mounted) return;
-    if (noveJazdy.isNotEmpty || vzdialeneNastavenia != null) {
+    final ZmenaNastaveni? neodoslaneNastavenia = await _ulozisko
+        .nacitatNeodoslaneNastavenia();
+    if (neodoslaneNastavenia != null) {
+      await _cloud.odoslatNastavenia(neodoslaneNastavenia);
+      await _ulozisko.oznacitNastaveniaOdoslane(neodoslaneNastavenia.upravene);
+    }
+
+    if (zmenene) {
+      final udaje = await _ulozisko.nacitat();
+      if (!mounted) return;
       setState(() {
-        _jazdy.addAll(noveJazdy);
-        if (vzdialeneNastavenia != null) {
-          _nastaveniaVozidla = vzdialeneNastavenia;
-        }
+        _jazdy
+          ..clear()
+          ..addAll(udaje.jazdy);
+        _nastaveniaVozidla = udaje.nastavenia;
       });
     }
     if (zobrazitVysledok) {
@@ -310,10 +437,21 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     }
   }
 
+  Future<StavRozpoznavaniaAktivity> _obnovitRozpoznavanie() async {
+    await _rozpoznavanieAktivity.obnovitAkJeAktivne();
+    return _rozpoznavanieAktivity.zistitStav();
+  }
+
+  Future<StavRozpoznavaniaAktivity> _vypnutRozpoznavanie() async {
+    await _rozpoznavanieAktivity.zastavit();
+    if (_gpsTracking.sledovanieBezi) await _gpsTracking.zastavitSledovanie();
+    return _rozpoznavanieAktivity.zistitStav();
+  }
+
   Future<void> _odhlasitZCloudu() async {
     await _cloud.odhlasit();
     if (mounted) {
-      setState(() {});
+      setState(() => _ucet = null);
       _zobrazitSpravu('Z cloudového účtu ste boli odhlásený.');
     }
   }
@@ -338,83 +476,19 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     }
   }
 
-  Future<int> _nahraditUkazkoveJazdy() async {
-    final dnes = DateTime.now();
-    final prvyDenRoka = DateTime(dnes.year);
-    final trasy = [
-      (ciel: 'Nové Zámky', kilometre: 18.2),
-      (ciel: 'Nitra', kilometre: 43.7),
-      (ciel: 'Komárno', kilometre: 40.5),
-      (ciel: 'Levice', kilometre: 45.9),
-      (ciel: 'Kolárovo', kilometre: 29.1),
-    ];
-    final povodneJazdy = _jazdy
-        .where(
-          (jazda) =>
-              !jazda.datum.isBefore(prvyDenRoka) && !jazda.datum.isAfter(dnes),
-        )
-        .toList();
-    if (_cloudovaSynchronizacia?.aktualnyUcet != null) {
-      await _cloud.vymazatJazdy(povodneJazdy);
-    }
-    await _ulozisko.vymazatJazdy(povodneJazdy);
-
-    final noveJazdy = <Jazda>[];
-
-    for (
-      var datum = prvyDenRoka;
-      !datum.isAfter(dnes);
-      datum = datum.add(const Duration(days: 1))
-    ) {
-      final trasa = trasy[(datum.day - 1) % trasy.length];
-      final zaciatokHodina = 7 + (datum.day % 3);
-      final typ = datum.weekday <= DateTime.friday
-          ? TypJazdy.sluzobna
-          : TypJazdy.sukromna;
-      final tam = Jazda(
-        datum: datum,
-        odkial: 'Šaľa',
-        kam: trasa.ciel,
-        zaciatok: '${zaciatokHodina.toString().padLeft(2, '0')}:15',
-        koniec: '${(zaciatokHodina + 1).toString().padLeft(2, '0')}:00',
-        kilometre: trasa.kilometre,
-        typ: typ,
-      );
-      final spat = Jazda(
-        datum: datum,
-        odkial: trasa.ciel,
-        kam: 'Šaľa',
-        zaciatok: '16:15',
-        koniec: '${(17 + datum.day % 2).toString().padLeft(2, '0')}:00',
-        kilometre: trasa.kilometre,
-        typ: typ,
-      );
-      noveJazdy
-        ..add(await _ulozisko.ulozitJazdu(tam))
-        ..add(await _ulozisko.ulozitJazdu(spat));
-    }
-
-    if (!mounted) return 0;
-    setState(() {
-      _jazdy
-        ..removeWhere(
-          (jazda) =>
-              !jazda.datum.isBefore(prvyDenRoka) && !jazda.datum.isAfter(dnes),
-        )
-        ..addAll(noveJazdy);
-    });
-    await _synchronizovatNaPozadi();
-    return noveJazdy.length;
-  }
-
   Future<void> _otvoritKalendar() async {
     final aktualnyRok = DateTime.now().year;
+    // Aj v januári sa musí dať otvoriť december a staršie jazdy.
+    final najstarsiRok = _jazdy.fold<int>(
+      aktualnyRok - 1,
+      (rok, jazda) => jazda.datum.year < rok ? jazda.datum.year : rok,
+    );
     final vybranyDatum = await showDatePicker(
       context: context,
       initialDate: _vybranyDatum,
-      firstDate: DateTime(aktualnyRok),
+      firstDate: DateTime(najstarsiRok),
       lastDate: DateTime(aktualnyRok + 1, 12, 31),
-      helpText: 'Vyber ľubovoľný deň mesiaca',
+      helpText: 'Vyber deň',
       cancelText: 'Zrušiť',
       confirmText: 'Vybrať',
     );
@@ -422,6 +496,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
     if (vybranyDatum == null || !mounted) return;
 
     setState(() => _vybranyDatum = vybranyDatum);
+    await _otvoritDetailDna(vybranyDatum);
   }
 
   Future<void> _otvoritDetailDna(DateTime datum) async {
@@ -432,14 +507,18 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
         .map(
           (zaznam) => JazdaDna(indexVZozname: zaznam.key, jazda: zaznam.value),
         )
-        .toList();
+        .toList()
+      ..sort((a, b) => porovnatJazdy(a.jazda, b.jazda));
 
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (context) => DetailDnaPage(
           datum: formatovatDatum(datum),
+          den: datum,
           jazdy: jazdyDna,
           onJazdaUpravena: _upravitJazdu,
+          onJazdaPridana: _pridatJazdu,
+          onJazdaVymazana: _vymazatJazdu,
         ),
       ),
     );
@@ -463,7 +542,13 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
         ? null
         : kilometre * _nastaveniaVozidla.priemernaSpotreba! / 100;
     final jazdyPodlaDna = <DateTime, List<Jazda>>{};
-    for (final jazda in jazdyVMesiaci) {
+    final zoradene = [...jazdyVMesiaci]
+      ..sort((a, b) {
+        final den = DateTime(b.datum.year, b.datum.month, b.datum.day)
+            .compareTo(DateTime(a.datum.year, a.datum.month, a.datum.day));
+        return den != 0 ? den : porovnatJazdy(a, b);
+      });
+    for (final jazda in zoradene) {
       final datum = DateTime(
         jazda.datum.year,
         jazda.datum.month,
@@ -493,20 +578,17 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
             ? NastaveniaVozidlaPage(
                 nastavenia: _nastaveniaVozidla,
                 onUlozit: _ulozitNastaveniaVozidla,
-                onSpatNaJazdy: () {
-                  setState(() => _vybranaZalozka = 0);
-                },
                 onPovolitRozpoznavanie: _povolitRozpoznavanie,
+                onVypnutRozpoznavanie: _vypnutRozpoznavanie,
+                onObnovitRozpoznavanie: _obnovitRozpoznavanie,
                 onZistitStavRozpoznavania: _rozpoznavanieAktivity.zistitStav,
                 onOtvoritNastaveniaPolohy: _gpsPozadie.otvoritNastaveniaPolohy,
-                cloudovyUcet: _cloud.aktualnyUcet,
+                cloudovyUcet: firebaseDostupny ? _cloud.aktualnyUcet : null,
                 onPrihlasitACSynchronizovat: _prihlasitACSynchronizovat,
                 onSynchronizovat: () =>
                     _synchronizovatDoCloudu(zobrazitVysledok: true),
                 onOdhlasitZCloudu: _odhlasitZCloudu,
-                onVlozitUkazkoveJazdy: kDebugMode
-                    ? _nahraditUkazkoveJazdy
-                    : null,
+                onVymazatVsetkyJazdy: _vymazatVsetkyJazdy,
               )
             : _vybranaZalozka == 1
             ? _PrehladPage(
@@ -518,6 +600,22 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage> {
             : ListView(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                 children: [
+                  if (firebaseDostupny && _ucet == null) ...[
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.cloud_off_outlined),
+                        title: const Text('Jazdy nie sú zálohované'),
+                        subtitle: const Text(
+                          'Prihlás sa cez Google a jazdy sa budú automaticky zálohovať do cloudu.',
+                        ),
+                        trailing: TextButton(
+                          onPressed: _prihlasitACSynchronizovat,
+                          child: const Text('Prihlásiť'),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Text(
                     '${nazovMesiaca(_vybranyDatum.month)} ${_vybranyDatum.year}',
                     style: theme.textTheme.titleMedium,

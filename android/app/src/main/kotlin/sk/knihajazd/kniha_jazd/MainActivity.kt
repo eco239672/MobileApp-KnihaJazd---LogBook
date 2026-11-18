@@ -9,10 +9,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import com.google.android.gms.location.ActivityRecognition
-import com.google.android.gms.location.ActivityTransition
-import com.google.android.gms.location.ActivityTransitionRequest
-import com.google.android.gms.location.DetectedActivity
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -22,7 +18,7 @@ import org.json.JSONArray
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity"
     private val eventChannelName = "sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity_udalosti"
-    private val requestActivityRecognition = 481
+    private val requestPovolenia = 481
 
     private var eventSink: EventChannel.EventSink? = null
     private var cakajuciVysledokPovolenia: MethodChannel.Result? = null
@@ -90,7 +86,7 @@ class MainActivity : FlutterActivity() {
         )
         return mapOf(
             "povolene" to maPovolenie(),
-            "aktivne" to preferencie.getBoolean("aktivne", false),
+            "aktivne" to RegistraciaRozpoznavania.jeZapnute(this),
             "vAute" to preferencie.getBoolean(
                 RozpoznavanieAktivityReceiver.KLUC_V_AUTE,
                 false,
@@ -110,7 +106,7 @@ class MainActivity : FlutterActivity() {
         return buildList {
             for (index in 0 until jazdy.length()) {
                 val jazda = jazdy.optJSONObject(index) ?: continue
-                add(
+                val zaznam = runCatching {
                     mapOf(
                         "id" to jazda.getString("id"),
                         "zaciatokLatitude" to jazda.getDouble("zaciatokLatitude"),
@@ -124,8 +120,9 @@ class MainActivity : FlutterActivity() {
                         "koniecPresnost" to jazda.getDouble("koniecPresnost"),
                         "koniecRychlost" to jazda.getDouble("koniecRychlost"),
                         "prejdeneMetre" to jazda.getDouble("prejdeneMetre"),
-                    ),
-                )
+                    )
+                }.getOrNull() ?: continue
+                add(zaznam)
             }
         }
     }
@@ -159,21 +156,31 @@ class MainActivity : FlutterActivity() {
         result.success(null)
     }
 
-    private fun maPovolenie(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
-            checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) ==
-                PackageManager.PERMISSION_GRANTED
+    private fun maPovolenie(): Boolean = RegistraciaRozpoznavania.maPovolenieAktivity(this)
 
+    /**
+     * Jedným systémovým dialógom vypýta všetko, čo automatické sledovanie
+     * potrebuje: Fyzická aktivita, presná poloha a (Android 13+) notifikácie.
+     * Polohu „Povoliť vždy“ Android 11+ dovolí zapnúť už len v nastaveniach.
+     */
     private fun povolitASpustit(result: MethodChannel.Result) {
-        if (!maPovolenie()) {
-            cakajuciVysledokPovolenia = result
-            requestPermissions(
-                arrayOf(Manifest.permission.ACTIVITY_RECOGNITION),
-                requestActivityRecognition,
-            )
+        val chybajuce = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(Manifest.permission.ACTIVITY_RECOGNITION)
+            }
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+
+        if (chybajuce.isEmpty()) {
+            spustitRozpoznavanie(result)
             return
         }
-        spustitRozpoznavanie(result)
+        cakajuciVysledokPovolenia = result
+        requestPermissions(chybajuce.toTypedArray(), requestPovolenia)
     }
 
     /**
@@ -182,11 +189,7 @@ class MainActivity : FlutterActivity() {
      * ak používateľ už raz udelil potrebné povolenie.
      */
     private fun obnovitAkJeAktivne(result: MethodChannel.Result) {
-        val preferencie = getSharedPreferences(
-            RozpoznavanieAktivityReceiver.PREFERENCIE,
-            Context.MODE_PRIVATE,
-        )
-        if (!maPovolenie() || !preferencie.getBoolean("aktivne", false)) {
+        if (!maPovolenie() || !RegistraciaRozpoznavania.jeZapnute(this)) {
             result.success(null)
             return
         }
@@ -199,10 +202,12 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != requestActivityRecognition) return
+        if (requestCode != requestPovolenia) return
 
         val result = cakajuciVysledokPovolenia ?: return
         cakajuciVysledokPovolenia = null
+        // Bez Fyzickej aktivity nevieme rozpoznať jazdu. Polohu a notifikácie
+        // používateľ môže doplniť neskôr; obrazovka Nastavenia ho na to upozorní.
         if (!maPovolenie()) {
             result.error("POVOLENIE_ZAMIETNUTE", "Povolenie Fyzická aktivita nebolo udelené.", null)
             return
@@ -211,118 +216,26 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun spustitRozpoznavanie(result: MethodChannel.Result) {
-        val transitions = listOf(
-            ActivityTransition.Builder()
-                .setActivityType(DetectedActivity.IN_VEHICLE)
-                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                .build(),
-            ActivityTransition.Builder()
-                .setActivityType(DetectedActivity.IN_VEHICLE)
-                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
-                .build(),
-        )
-        val request = ActivityTransitionRequest(transitions)
-        fun zaregistrovatAktualnyPendingIntent() {
-            ActivityRecognition.getClient(this)
-                .requestActivityTransitionUpdates(request, pendingIntent())
-                .addOnSuccessListener {
-                    ActivityRecognition.getClient(this)
-                        .requestActivityUpdates(
-                            INTERVAL_AKTUALIZACIE_AKTIVITY_MILLIS,
-                            aktualizaciaAktivityPendingIntent(),
-                        )
-                        .addOnSuccessListener {
-                            getSharedPreferences(
-                                RozpoznavanieAktivityReceiver.PREFERENCIE,
-                                Context.MODE_PRIVATE,
-                            ).edit().putBoolean("aktivne", true).apply()
-                            result.success(null)
-                        }
-                        .addOnFailureListener { chyba ->
-                            ActivityRecognition.getClient(this)
-                                .removeActivityTransitionUpdates(pendingIntent())
-                            result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
-                        }
-                }
-                .addOnFailureListener { chyba ->
-                    result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
-                }
-        }
-
-        // Staršia verzia aplikácie prijímala tie isté udalosti cez BroadcastReceiver.
-        // Pred novou registráciou ho odstránime, aby pri aktualizácii nevznikli duplicitné
-        // pokusy o spustenie sledovania.
-        val staryPendingIntent = staryPendingIntent()
-        if (staryPendingIntent == null) {
-            zaregistrovatAktualnyPendingIntent()
-        } else {
-            ActivityRecognition.getClient(this)
-                .removeActivityTransitionUpdates(staryPendingIntent)
-                .addOnCompleteListener { zaregistrovatAktualnyPendingIntent() }
+        RegistraciaRozpoznavania.zaregistrovat(this) { chyba ->
+            if (chyba == null) {
+                result.success(null)
+            } else {
+                result.error("ROZPOZNAVANIE_CHYBA", chyba.message, null)
+            }
         }
     }
 
+    /** Vypne automatické sledovanie a ukončí prípadnú prebiehajúcu jazdu. */
     private fun zastavit(result: MethodChannel.Result) {
-        ActivityRecognition.getClient(this)
-            .removeActivityTransitionUpdates(pendingIntent())
-            .addOnCompleteListener {
-                ActivityRecognition.getClient(this)
-                    .removeActivityUpdates(aktualizaciaAktivityPendingIntent())
-                    .addOnCompleteListener {
-                        getSharedPreferences(
-                            RozpoznavanieAktivityReceiver.PREFERENCIE,
-                            Context.MODE_PRIVATE,
-                        ).edit().putBoolean("aktivne", false).apply()
-                        result.success(null)
-                    }
+        if (GpsSledovanieService.maRozpracovaneSledovanie(this)) {
+            runCatching {
+                startService(
+                    Intent(this, GpsSledovanieService::class.java)
+                        .setAction(GpsSledovanieService.AKCIA_ZASTAVIT),
+                )
             }
-    }
-
-    private fun pendingIntent(): android.app.PendingIntent {
-        val intent = Intent(this, GpsSledovanieService::class.java)
-            .setAction(GpsSledovanieService.AKCIA_SPRACOVAT_AKTIVITU)
-        val flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                android.app.PendingIntent.FLAG_MUTABLE
-            } else {
-                0
-            }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            android.app.PendingIntent.getForegroundService(this, 0, intent, flags)
-        } else {
-            android.app.PendingIntent.getService(this, 0, intent, flags)
         }
-    }
-
-    private fun aktualizaciaAktivityPendingIntent(): android.app.PendingIntent {
-        val flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                android.app.PendingIntent.FLAG_MUTABLE
-            } else {
-                0
-            }
-        return android.app.PendingIntent.getBroadcast(
-            this,
-            1,
-            Intent(this, RozpoznavanieAktivityReceiver::class.java)
-                .setAction(RozpoznavanieAktivityReceiver.AKCIA_AKTUALIZACIA_AKTIVITY),
-            flags,
-        )
-    }
-
-    private fun staryPendingIntent(): android.app.PendingIntent? {
-        val flags = android.app.PendingIntent.FLAG_NO_CREATE or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                android.app.PendingIntent.FLAG_MUTABLE
-            } else {
-                0
-            }
-        return android.app.PendingIntent.getBroadcast(
-            this,
-            0,
-            Intent(this, RozpoznavanieAktivityReceiver::class.java),
-            flags,
-        )
+        RegistraciaRozpoznavania.odregistrovat(this) { result.success(null) }
     }
 
     private fun zaregistrovatPrijimac() {
@@ -348,9 +261,5 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         odregistrovatPrijimac()
         super.onDestroy()
-    }
-
-    private companion object {
-        const val INTERVAL_AKTUALIZACIE_AKTIVITY_MILLIS = 30_000L
     }
 }

@@ -67,3 +67,19 @@ class JazdaDna {
     return JazdaDna(indexVZozname: indexVZozname, jazda: jazda);
   }
 }
+
+/// Minúty od polnoci z času „HH:MM“ (aj „8:05“). Neplatný čas = 0.
+int minutyZCasu(String cas) {
+  final casti = cas.trim().split(':');
+  if (casti.length != 2) return 0;
+  return (int.tryParse(casti[0]) ?? 0) * 60 + (int.tryParse(casti[1]) ?? 0);
+}
+
+/// Poradie jázd: podľa dňa a v rámci dňa podľa času začiatku.
+int porovnatJazdy(Jazda a, Jazda b) {
+  final denA = DateTime(a.datum.year, a.datum.month, a.datum.day);
+  final denB = DateTime(b.datum.year, b.datum.month, b.datum.day);
+  final den = denA.compareTo(denB);
+  if (den != 0) return den;
+  return minutyZCasu(a.zaciatok).compareTo(minutyZCasu(b.zaciatok));
+}

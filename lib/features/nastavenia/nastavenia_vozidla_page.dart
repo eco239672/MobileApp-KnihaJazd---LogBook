@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../models/nastavenia_vozidla.dart';
@@ -9,29 +11,36 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   const NastaveniaVozidlaPage({
     required this.nastavenia,
     required this.onUlozit,
-    required this.onSpatNaJazdy,
     required this.onPovolitRozpoznavanie,
+    required this.onVypnutRozpoznavanie,
+    required this.onObnovitRozpoznavanie,
     required this.onZistitStavRozpoznavania,
     required this.onOtvoritNastaveniaPolohy,
     required this.cloudovyUcet,
     required this.onPrihlasitACSynchronizovat,
     required this.onSynchronizovat,
     required this.onOdhlasitZCloudu,
-    this.onVlozitUkazkoveJazdy,
+    this.onVymazatVsetkyJazdy,
     super.key,
   });
 
   final NastaveniaVozidla nastavenia;
   final Future<void> Function(NastaveniaVozidla) onUlozit;
-  final VoidCallback onSpatNaJazdy;
   final Future<StavRozpoznavaniaAktivity> Function() onPovolitRozpoznavanie;
+  final Future<StavRozpoznavaniaAktivity> Function() onVypnutRozpoznavanie;
+
+  /// Tichá obnova registrácie bez systémových dialógov (po návrate do aplikácie).
+  final Future<StavRozpoznavaniaAktivity> Function() onObnovitRozpoznavanie;
   final Future<StavRozpoznavaniaAktivity> Function() onZistitStavRozpoznavania;
   final Future<void> Function() onOtvoritNastaveniaPolohy;
   final CloudovyUcet? cloudovyUcet;
   final Future<void> Function() onPrihlasitACSynchronizovat;
   final Future<void> Function() onSynchronizovat;
   final Future<void> Function() onOdhlasitZCloudu;
-  final Future<int> Function()? onVlozitUkazkoveJazdy;
+
+  /// Vymaže všetky jazdy v telefóne (a po synchronizácii aj v cloude).
+  /// Vráti počet vymazaných jázd.
+  final Future<int> Function()? onVymazatVsetkyJazdy;
 
   @override
   State<NastaveniaVozidlaPage> createState() => _NastaveniaVozidlaPageState();
@@ -48,7 +57,13 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
   var _meniSaRozpoznavanie = false;
   var _otvaraNastaveniaPolohy = false;
   var _pracujeSCloudom = false;
-  var _vytvaraUkazkoveJazdy = false;
+  var _mazeJazdy = false;
+
+  // Ochrana pred omylom: tlačidlo treba stlačiť niekoľkokrát po sebe.
+  static const _potrebnychStlaceni = 3;
+  static const _limitMedziStlaceniami = Duration(seconds: 3);
+  var _stlaceniaMazania = 0;
+  Timer? _vynulovanieStlaceni;
 
   @override
   void initState() {
@@ -68,7 +83,26 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
   }
 
   @override
+  void didUpdateWidget(NastaveniaVozidlaPage starsi) {
+    super.didUpdateWidget(starsi);
+    // Nastavenia sa môžu zmeniť zvonka (stiahnutie z cloudu). Bez tohto by
+    // formulár ukazoval staré hodnoty a „Uložiť“ by ich znova prepísal.
+    final nove = widget.nastavenia;
+    final stare = starsi.nastavenia;
+    if (nove.spz != stare.spz ||
+        nove.priemernaSpotreba != stare.priemernaSpotreba ||
+        nove.cenaBenzinu != stare.cenaBenzinu ||
+        nove.cenaNafty != stare.cenaNafty) {
+      _spz.text = nove.spz;
+      _spotreba.text = nove.priemernaSpotreba?.toString() ?? '';
+      _cenaBenzinu.text = nove.cenaBenzinu?.toString() ?? '';
+      _cenaNafty.text = nove.cenaNafty?.toString() ?? '';
+    }
+  }
+
+  @override
   void dispose() {
+    _vynulovanieStlaceni?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _spz.dispose();
     _spotreba.dispose();
@@ -126,7 +160,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
       }
       // Po návrate zo systémových nastavení znovu zaregistruje Android
       // rozpoznávanie jazdy, bez ďalšieho dialógu pre používateľa.
-      final obnovenyStav = await widget.onPovolitRozpoznavanie();
+      final obnovenyStav = await widget.onObnovitRozpoznavanie();
       if (mounted) setState(() => _stavRozpoznavania = obnovenyStav);
     } catch (_) {
       // Používateľ môže aplikáciu naďalej používať a stav znovu overiť neskôr.
@@ -144,6 +178,44 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Rozpoznávanie jazdy sa nepodarilo zapnúť.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _meniSaRozpoznavanie = false);
+    }
+  }
+
+  Future<void> _vypnutRozpoznavanie() async {
+    final potvrdene = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vypnúť automatické sledovanie?'),
+        content: const Text(
+          'Jazdy sa prestanú zaznamenávať automaticky. Prebiehajúca jazda sa uloží.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Zrušiť'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Vypnúť'),
+          ),
+        ],
+      ),
+    );
+    if (potvrdene != true || !mounted) return;
+    setState(() => _meniSaRozpoznavanie = true);
+    try {
+      final stav = await widget.onVypnutRozpoznavanie();
+      if (!mounted) return;
+      setState(() => _stavRozpoznavania = stav);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Automatické sledovanie sa nepodarilo vypnúť.'),
         ),
       );
     } finally {
@@ -176,23 +248,65 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     }
   }
 
-  Future<void> _vlozitUkazkoveJazdy() async {
-    final akcia = widget.onVlozitUkazkoveJazdy;
+  void _stlacitMazanie() {
+    _vynulovanieStlaceni?.cancel();
+    final stlacenia = _stlaceniaMazania + 1;
+    if (stlacenia < _potrebnychStlaceni) {
+      setState(() => _stlaceniaMazania = stlacenia);
+      // Bez ďalšieho stlačenia do 3 sekúnd sa počítadlo vynuluje.
+      _vynulovanieStlaceni = Timer(_limitMedziStlaceniami, () {
+        if (mounted) setState(() => _stlaceniaMazania = 0);
+      });
+      return;
+    }
+    setState(() => _stlaceniaMazania = 0);
+    unawaited(_vymazatVsetkyJazdy());
+  }
+
+  Future<void> _vymazatVsetkyJazdy() async {
+    final akcia = widget.onVymazatVsetkyJazdy;
     if (akcia == null) return;
-    setState(() => _vytvaraUkazkoveJazdy = true);
+    final prihlaseny = widget.cloudovyUcet != null;
+    final potvrdene = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vymazať všetky jazdy?'),
+        content: Text(
+          prihlaseny
+              ? 'Natrvalo sa vymažú všetky jazdy v telefóne aj v cloude. Nastavenia vozidla zostanú. Túto akciu nie je možné vrátiť.'
+              : 'Natrvalo sa vymažú všetky jazdy v telefóne. Nastavenia vozidla zostanú. Túto akciu nie je možné vrátiť.\n\nAk máš jazdy zálohované v cloude, najprv sa prihlás cez Google, inak sa pri ďalšom prihlásení z cloudu vrátia.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Zrušiť'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Vymazať všetko'),
+          ),
+        ],
+      ),
+    );
+    if (potvrdene != true || !mounted) return;
+    setState(() => _mazeJazdy = true);
     try {
       final pocet = await akcia();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nahradených ukážkových jázd: $pocet.')),
+        SnackBar(content: Text('Vymazaných jázd: $pocet.')),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ukážkové jazdy sa nepodarilo nahradiť.')),
+        const SnackBar(content: Text('Jazdy sa nepodarilo vymazať.')),
       );
     } finally {
-      if (mounted) setState(() => _vytvaraUkazkoveJazdy = false);
+      if (mounted) setState(() => _mazeJazdy = false);
     }
   }
 
@@ -293,52 +407,19 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                     validator: (hodnota) => _kladneCislo(hodnota, 'cenu nafty'),
                   ),
                   const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: widget.onSpatNaJazdy,
-                          icon: const Icon(Icons.arrow_back),
-                          label: const Text('Späť na jazdy'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _ulozit,
-                          icon: const Icon(Icons.save_outlined),
-                          label: const Text('Uložiť'),
-                        ),
-                      ),
-                    ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _ulozit,
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('Uložiť'),
+                    ),
                   ),
                 ],
               ),
             ),
           ),
         ),
-        if (widget.onVlozitUkazkoveJazdy != null) ...[
-          const SizedBox(height: 16),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.science_outlined),
-              title: const Text('Ukážkové jazdy'),
-              subtitle: const Text(
-                'Nahradí testovacie jazdy pármi tam aj späť zo Šale.',
-              ),
-              trailing: FilledButton(
-                onPressed: _vytvaraUkazkoveJazdy ? null : _vlozitUkazkoveJazdy,
-                child: _vytvaraUkazkoveJazdy
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Nahradiť'),
-              ),
-            ),
-          ),
-        ],
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -425,7 +506,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                   _stavRozpoznavania?.aktivne != true
                       ? 'Stačí raz povoliť rozpoznávanie pohybu.'
                       : !_stavRozpoznavania!.polohaNaPozadiPovolena
-                      ? 'Na automatické sledovanie ešte treba povoliť polohu na pozadí.'
+                      ? 'Ešte treba povoliť polohu: v nastaveniach aplikácie otvor Povolenia → Poloha, zvoľ „Povoliť vždy“ a zapni „Použiť presnú polohu“.'
                       : _stavRozpoznavania?.vAute == true
                       ? 'Automatické sledovanie je pripravené: práve v aute.'
                       : 'Automatické sledovanie je pripravené a čaká na jazdu.',
@@ -458,12 +539,81 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.location_on_outlined),
-                    label: const Text('Zapnúť automatické sledovanie'),
+                    label: const Text('Otvoriť nastavenia polohy'),
                   ),
+                if (_stavRozpoznavania?.aktivne == true) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: _meniSaRozpoznavanie
+                        ? null
+                        : _vypnutRozpoznavanie,
+                    icon: const Icon(Icons.pause_circle_outline),
+                    label: const Text('Vypnúť automatické sledovanie'),
+                  ),
+                ],
               ],
             ),
           ),
         ),
+        if (widget.onVymazatVsetkyJazdy != null) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Údaje', style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: theme.colorScheme.error,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Vymaže natrvalo všetky jazdy. Pre istotu treba tlačidlo stlačiť $_potrebnychStlaceni× po sebe.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _mazeJazdy ? null : _stlacitMazanie,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: theme.colorScheme.error,
+                        foregroundColor: theme.colorScheme.onError,
+                      ),
+                      icon: _mazeJazdy
+                          ? SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.colorScheme.onError,
+                              ),
+                            )
+                          : const Icon(Icons.delete_forever_outlined),
+                      label: Text(
+                        _stlaceniaMazania == 0
+                            ? 'Vymazať všetky jazdy'
+                            : 'Stlač ešte ${_potrebnychStlaceni - _stlaceniaMazania}× pre vymazanie',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
