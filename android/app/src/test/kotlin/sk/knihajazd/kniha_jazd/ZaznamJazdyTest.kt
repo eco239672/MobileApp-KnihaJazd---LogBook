@@ -26,6 +26,7 @@ import kotlin.math.sqrt
  *
  * Spustenie (v priečinku android): .\gradlew.bat :app:testDebugUnitTest
  * Priebeh jázd sa zapíše do build\simulacia-jazdy.txt v koreni projektu.
+ * Náhodné jazdy používajú 500 obcí zo src/test/resources/obce_sk.csv.
  */
 class ZaznamJazdyTest {
 
@@ -158,6 +159,201 @@ class ZaznamJazdyTest {
         assertEquals(2_500.0, uzavreta!!.prejdeneMetre, 0.001)
     }
 
+    /**
+     * 500 jázd medzi náhodne vybranými obcami a mestami SR (src/test/resources/obce_sk.csv).
+     * Trasa je zjednodušená (lomená čiara so zákrutami, nie skutočné cesty), podmienky
+     * sú náhodné, ale vždy také, pri ktorých má vzniknúť práve jedna správna jazda.
+     * Rovnaké semienko = vždy rovnaké jazdy, takže každá chyba sa dá zopakovať.
+     */
+    @Test
+    fun `500 náhodných jázd medzi obcami Slovenska`() {
+        val obce = nacitatObce()
+        assertEquals("Súbor obce_sk.csv má mať 500 obcí", 500, obce.size)
+        val nahoda = Random(SEMIENKO_NAHODNYCH_JAZD)
+        val chyby = mutableListOf<String>()
+        val prehlad = mutableListOf<String>()
+        var najvacsiaOdchylka = 0.0
+        var spoluKm = 0.0
+        var uspornych = 0
+
+        obce.forEachIndexed { i, odkial ->
+            val cislo = i + 1
+            val kam = vybratCiel(odkial, obce, nahoda)
+            val plan = PlanJazdy.nahodny(odkial, kam, nahoda)
+            val start = LocalDateTime.of(2026, 1, 1, 6, 0).plusMinutes(nahoda.nextInt(60 * 24 * 300).toLong())
+            val sim = Simulacia("#$cislo ${odkial.nazov} → ${kam.nazov}", start, semienko = 1_000L + cislo)
+            val vysledok = try {
+                sim.jazditPodlaPlanu(plan)
+            } catch (chyba: AssertionError) {
+                chyba.message ?: "chyba"
+            }
+            if (sim.usporneBolo) uspornych++
+            val jazda = sim.jazdy.singleOrNull()
+            val odchylka = jazda?.let { (it.prejdeneMetre - plan.trasa.dlzkaMetre) / plan.trasa.dlzkaMetre * 100 }
+            if (odchylka != null) najvacsiaOdchylka = maxOf(najvacsiaOdchylka, abs(odchylka))
+            spoluKm += plan.trasa.dlzkaMetre / 1000
+            val riadok = "#$cislo ${odkial.nazov} → ${kam.nazov}: trasa ${"%.2f".format(plan.trasa.dlzkaMetre / 1000)} km, " +
+                (jazda?.let { "zaznamenané ${"%.2f".format(it.prejdeneMetre / 1000)} km (${"%+.2f".format(odchylka)} %)" } ?: "bez jazdy") +
+                " | ${plan.popis}"
+            if (vysledok == null) {
+                prehlad += "OK    $riadok"
+            } else {
+                prehlad += "ZLE   $riadok\n      $vysledok"
+                chyby += "$riadok\n      $vysledok"
+                if (chyby.size <= 5) sim.vypisat()
+            }
+        }
+
+        PRIEBEH += "=== 500 náhodných jázd: ${500 - chyby.size} OK, ${chyby.size} zlyhalo ==="
+        PRIEBEH += "Spolu ${"%.0f".format(spoluKm)} km, najväčšia odchýlka kilometrov ${"%.2f".format(najvacsiaOdchylka)} %, " +
+            "úsporný režim GPS použitý v $uspornych jazdách"
+        PRIEBEH += prehlad
+        PRIEBEH += ""
+        assertTrue(
+            "${chyby.size} z 500 jázd zlyhalo:\n" + chyby.take(10).joinToString("\n"),
+            chyby.isEmpty(),
+        )
+    }
+
+    private class Obec(val nazov: String, val okres: String, val lat: Double, val lon: Double) {
+        val poloha get() = Pair(lat, lon)
+    }
+
+    private fun nacitatObce(): List<Obec> {
+        val subor = javaClass.getResourceAsStream("/obce_sk.csv")
+            ?: File("src/test/resources/obce_sk.csv").takeIf { it.exists() }?.inputStream()
+            ?: error("Chýba src/test/resources/obce_sk.csv")
+        return subor.bufferedReader(Charsets.UTF_8).readLines()
+            .filter { it.isNotBlank() && !it.startsWith("#") }
+            .map { riadok ->
+                val (nazov, okres, lat, lon) = riadok.split(";")
+                Obec(nazov, okres, lat.toDouble(), lon.toDouble())
+            }
+    }
+
+    /** Každá piata jazda je krátka (do susednej obce), ostatné kamkoľvek po Slovensku. */
+    private fun vybratCiel(odkial: Obec, obce: List<Obec>, nahoda: Random): Obec {
+        val ostatne = obce.filter { it !== odkial && vzdialenost(it.poloha, odkial.poloha) >= 2_000 }
+        if (nahoda.nextInt(5) == 0) {
+            val najblizsie = ostatne.sortedBy { vzdialenost(it.poloha, odkial.poloha) }.take(6)
+            return najblizsie[nahoda.nextInt(najblizsie.size)]
+        }
+        return ostatne[nahoda.nextInt(ostatne.size)]
+    }
+
+    /** Zastávka na trase: semafor, krátke zastavenie alebo zápcha. */
+    private class Zastavka(val poMetroch: Double, val sekund: Int, val istotaAuta: Int?, val nazov: String)
+
+    private class PlanJazdy(
+        val trasa: Trasa,
+        val cakanieMinut: Int,
+        val istotaPriCakani: Int?,
+        val istotaPocasJazdy: Int?,
+        val rychlostMimoMesta: Double,
+        val zastavky: List<Zastavka>,
+        val tunely: List<ClosedFloatingPointRange<Double>>,
+        val falosneVystupenia: List<Double>,
+        val vystupeniaBezOdhadu: List<Double>,
+        val podielNepresnych: Double,
+    ) {
+        val popis: String
+            get() = buildList {
+                add("čakanie $cakanieMinut min (Google ${istotaPriCakani?.let { "$it %" } ?: "-"})")
+                add("jazda Google ${istotaPocasJazdy?.let { "$it %" } ?: "-"}")
+                add("${rychlostMimoMesta.toInt()} km/h")
+                zastavky.groupBy { it.nazov }.forEach { (nazov, z) -> add("$nazov ${z.size}× (${z.joinToString(",") { formatSekund(it.sekund) }})") }
+                if (tunely.isNotEmpty()) add("tunely ${tunely.size}× (${tunely.joinToString(",") { "%.1f km".format((it.endInclusive - it.start) / 1000) }})")
+                if (falosneVystupenia.isNotEmpty()) add("falošné vystúpenie ${falosneVystupenia.size}×")
+                if (vystupeniaBezOdhadu.isNotEmpty()) add("vystúpenie bez odhadu ${vystupeniaBezOdhadu.size}×")
+                add("nepresné body ${(podielNepresnych * 100).toInt()} %")
+            }.joinToString(", ")
+
+        companion object {
+            private const val MESTO_METRE = 3_000.0
+
+            fun nahodny(odkial: Obec, kam: Obec, n: Random): PlanJazdy {
+                val trasa = trasaSoZakrutami(odkial.poloha, kam.poloha, n)
+                val dlzka = trasa.dlzkaMetre
+                val istotaPriCakani = listOf(70, 70, 10, null)[n.nextInt(4)]
+                val istotaPocasJazdy = listOf(85, 85, 60, 10, null)[n.nextInt(5)]
+
+                // Úseky, kde nesmie byť nič iné (zastávka, tunel, udalosť), aby sa neprekrývali.
+                val obsadene = mutableListOf<ClosedFloatingPointRange<Double>>()
+                fun volne(od: Double, po: Double) = od >= 500 && po <= dlzka - 1_500 &&
+                    obsadene.none { it.start < po + 1_500 && od < it.endInclusive + 1_500 }
+                fun najstMiesto(dlzkaUseku: Double, od: Double = 0.0, po: Double = dlzka): Double? {
+                    repeat(30) {
+                        val m = od + n.nextDouble() * (po - od)
+                        if (volne(m, m + dlzkaUseku)) {
+                            obsadene += m..(m + dlzkaUseku)
+                            return m
+                        }
+                    }
+                    return null
+                }
+
+                val zastavky = mutableListOf<Zastavka>()
+                // Semafory v meste na začiatku a na konci.
+                repeat(n.nextInt(4)) {
+                    val vMeste = if (n.nextBoolean()) 0.0 to MESTO_METRE else (dlzka - MESTO_METRE) to dlzka
+                    najstMiesto(0.0, vMeste.first.coerceAtLeast(0.0), vMeste.second)?.let {
+                        zastavky += Zastavka(it, 20 + n.nextInt(100), istotaPocasJazdy, "semafor")
+                    }
+                }
+                // Zápchy: s hláseným autom až 40 min, bez neho do 17 min (po 20 min sa jazda ukončí).
+                if (dlzka > 10_000) {
+                    repeat(n.nextInt(3)) {
+                        val istota = listOf(80, 60, 10, null)[n.nextInt(4)]
+                        val max = if (istota != null && istota >= ZaznamJazdy.MINIMALNA_ISTOTA_AUTA) 40 else 17
+                        najstMiesto(0.0)?.let { zastavky += Zastavka(it, 60 * (2 + n.nextInt(max - 1)), istota, "zápcha") }
+                    }
+                }
+                val tunely = mutableListOf<ClosedFloatingPointRange<Double>>()
+                if (dlzka > 30_000) {
+                    repeat(n.nextInt(3)) {
+                        val dlzkaTunela = 300.0 + n.nextDouble() * 1_700
+                        najstMiesto(dlzkaTunela, 5_000.0, dlzka - 5_000)?.let { tunely += it..(it + dlzkaTunela) }
+                    }
+                }
+                val falosne = List(n.nextInt(4)) { najstMiesto(0.0) }.filterNotNull()
+                val bezOdhadu = List(n.nextInt(3)) { najstMiesto(0.0) }.filterNotNull()
+
+                return PlanJazdy(
+                    trasa = trasa,
+                    cakanieMinut = 1 + n.nextInt(25),
+                    istotaPriCakani = istotaPriCakani,
+                    istotaPocasJazdy = istotaPocasJazdy,
+                    rychlostMimoMesta = listOf(70.0, 90.0, 110.0, 130.0)[n.nextInt(4)],
+                    zastavky = zastavky.sortedBy { it.poMetroch },
+                    tunely = tunely,
+                    falosneVystupenia = falosne.sorted(),
+                    vystupeniaBezOdhadu = bezOdhadu.sorted(),
+                    podielNepresnych = listOf(0.0, 0.05, 0.1)[n.nextInt(3)],
+                )
+            }
+
+            /** Lomená čiara z A do B: body každé 2–5 km, odklon ako pri skutočnej ceste. */
+            private fun trasaSoZakrutami(a: Pair<Double, Double>, b: Pair<Double, Double>, n: Random): Trasa {
+                val priama = vzdialenost(a, b)
+                val pocet = maxOf(2, (priama / (2_000 + n.nextDouble() * 3_000)).toInt())
+                val ohyb = (n.nextDouble() - 0.5) * 0.3 // celkový oblúk cesty
+                val kosLat = cos(Math.toRadians(a.first))
+                val dy = (b.first - a.first) * 111_320.0
+                val dx = (b.second - a.second) * 111_320.0 * kosLat
+                val body = (0..pocet).map { i ->
+                    val t = i.toDouble() / pocet
+                    if (i == 0) return@map a
+                    if (i == pocet) return@map b
+                    val bocne = ohyb * priama * sin(Math.PI * t) + (n.nextDouble() - 0.5) * minOf(600.0, priama / pocet * 0.4)
+                    val y = dy * t + (-dx / priama) * bocne
+                    val x = dx * t + (dy / priama) * bocne
+                    Pair(a.first + y / 111_320.0, a.second + x / (111_320.0 * kosLat))
+                }
+                return Trasa(body)
+            }
+        }
+    }
+
     // ---------------------------------------------------------------------
 
     private class Trasa(private val body: List<Pair<Double, Double>>) {
@@ -180,7 +376,7 @@ class ZaznamJazdyTest {
         }
     }
 
-    private class Simulacia(val nazov: String, start: LocalDateTime) {
+    private class Simulacia(val nazov: String, start: LocalDateTime, semienko: Long = 42) {
         var teraz: Long = start.atZone(ZONA).toInstant().toEpochMilli()
         val zapisy = mutableListOf<String>()
         val jazdy = mutableListOf<DokoncenaJazda>()
@@ -198,7 +394,7 @@ class ZaznamJazdyTest {
         private var odGps = 0L
 
         private var odKontroly = 0L
-        private val nahoda = Random(42)
+        private val nahoda = Random(semienko)
         private val zaznam = ZaznamJazdy(hodiny = { teraz }, zapis = { zapisy += "${cas(teraz)}  $it" })
 
         private fun spustitSledovanie() {
@@ -331,6 +527,83 @@ class ZaznamJazdyTest {
             )
         }
 
+        var usporneBolo = false
+            private set
+
+        /**
+         * Celá jazda podľa náhodného plánu, vrátane čakania pred odjazdom a odchodu od auta.
+         * Vráti null, ak vznikla správna jazda, inak popis chyby.
+         */
+        fun jazditPodlaPlanu(plan: PlanJazdy): String? {
+            val trasa = plan.trasa
+            val dlzka = trasa.dlzkaMetre
+            istotaAuta = plan.istotaPriCakani
+            nastupil()
+            repeat(plan.cakanieMinut * 6) {
+                krok(trasa.poloha(0.0), kmh = 0.0, presnost = 12f)
+                if (usporne) usporneBolo = true
+            }
+            if (!sleduje) return "Sledovanie skončilo počas čakania na odjazd (${dovody.joinToString()})"
+            val odjazd = teraz
+
+            var prejdene = 0.0
+            var dalsiaZastavka = 0
+            var dalsieFalosne = 0
+            var dalsieBezOdhadu = 0
+            var poslednyKrok = false
+            while (!poslednyKrok) {
+                val zastavka = plan.zastavky.getOrNull(dalsiaZastavka)
+                if (zastavka != null && prejdene >= zastavka.poMetroch) {
+                    dalsiaZastavka++
+                    istotaAuta = zastavka.istotaAuta
+                    repeat(zastavka.sekund / 10) { krok(trasa.poloha(prejdene), kmh = 0.0, presnost = 10f) }
+                }
+                val vMeste = prejdene < 3_000 || prejdene > dlzka - 3_000
+                val kmh = if (vMeste) 30.0 + nahoda.nextInt(21) else plan.rychlostMimoMesta - 10 + nahoda.nextInt(21)
+                prejdene = min(prejdene + kmh / 3.6 * 10, dlzka)
+                poslednyKrok = prejdene >= dlzka
+                istotaAuta = plan.istotaPocasJazdy
+                var vynutitPresny = poslednyKrok
+                if (dalsieFalosne < plan.falosneVystupenia.size && prejdene >= plan.falosneVystupenia[dalsieFalosne]) {
+                    dalsieFalosne++
+                    istotaAuta = 85
+                    vystupil()
+                    istotaAuta = plan.istotaPocasJazdy
+                }
+                if (dalsieBezOdhadu < plan.vystupeniaBezOdhadu.size && prejdene >= plan.vystupeniaBezOdhadu[dalsieBezOdhadu]) {
+                    dalsieBezOdhadu++
+                    istotaAuta = null
+                    vystupil()
+                    istotaAuta = plan.istotaPocasJazdy
+                    vynutitPresny = true
+                }
+                val vTuneli = plan.tunely.any { prejdene in it }
+                val presnost = if (!vynutitPresny && nahoda.nextDouble() < plan.podielNepresnych) 40f + nahoda.nextInt(60) else 5f + nahoda.nextInt(15)
+                krok(if (vTuneli) null else trasa.poloha(prejdene), kmh, presnost)
+            }
+            val prichod = teraz
+
+            istotaAuta = 5
+            vystupil()
+            ist(pesoMinut = 2, od = trasa.poloha(dlzka))
+            cakat(minuty = 5, poloha = null)
+
+            if (jazdy.size != 1) return "Očakávaná 1 jazda, vzniklo ${jazdy.size} (dôvody konca: ${dovody.joinToString()})"
+            if (dovody != listOf(DovodKonca.VYSTUPIL)) return "Nesprávny dôvod konca: ${dovody.joinToString()}"
+            val jazda = jazdy.single()
+            val tolerancia = maxOf(0.015 * dlzka, 150.0)
+            if (abs(jazda.prejdeneMetre - dlzka) > tolerancia) {
+                return "Kilometre: trasa ${"%.2f".format(dlzka / 1000)} km, zaznamenané ${"%.2f".format(jazda.prejdeneMetre / 1000)} km"
+            }
+            if (abs(jazda.zaciatok.casMillis - odjazd) > 70_000) return "Začiatok ${cas(jazda.zaciatok.casMillis)}, odjazd bol ${cas(odjazd)}"
+            if (abs(jazda.koniec.casMillis - prichod) > 20_000) return "Koniec ${cas(jazda.koniec.casMillis)}, príchod bol ${cas(prichod)}"
+            val odStartu = vzdialenost(trasa.poloha(0.0), Pair(jazda.zaciatok.latitude, jazda.zaciatok.longitude))
+            if (odStartu > 30) return "Začiatok ${"%.0f".format(odStartu)} m od miesta odjazdu"
+            val odCiela = vzdialenost(trasa.poloha(dlzka), Pair(jazda.koniec.latitude, jazda.koniec.longitude))
+            if (odCiela > 30) return "Koniec ${"%.0f".format(odCiela)} m od cieľa"
+            return null
+        }
+
         fun vypisat() {
             PRIEBEH += "=== $nazov ==="
             PRIEBEH += zapisy
@@ -362,6 +635,11 @@ class ZaznamJazdyTest {
     companion object {
         private val ZONA = ZoneId.of("Europe/Bratislava")
         private val PRIEBEH = mutableListOf<String>()
+        /** Rovnaké semienko = vždy rovnaké jazdy. Iné jazdy: zmeň 2026 na iné číslo. */
+        private val SEMIENKO_NAHODNYCH_JAZD = System.getProperty("semienko")?.toLongOrNull() ?: 2026L
+
+        private fun formatSekund(sekund: Int): String =
+            if (sekund >= 60) "${sekund / 60} min" else "$sekund s"
 
         /** Šaľa – Galanta – Sládkovičovo – Senec – D1 – Bratislava (zjednodušená trasa). */
         private val SALA_BRATISLAVA = Trasa(

@@ -73,6 +73,9 @@ class ZaznamJazdy(
 
     private var poslednyPohybMillis: Long? = null
     private var spusteneMillis = 0L
+
+    /** Kedy Google naposledy hlásil „v aute“ (pri kontrole konca). */
+    private var autoHlaseneMillis: Long? = null
     private var kandidatZaciatku: GpsBod? = null
     private var vystupilMillis: Long? = null
     private var zaciatokZapisany = false
@@ -93,6 +96,7 @@ class ZaznamJazdy(
     /** Začiatok (alebo obnovenie) sledovania: odtiaľto sa ráta čakanie na rozbeh. */
     fun spustit() {
         spusteneMillis = hodiny()
+        autoHlaseneMillis = null
         uspornyRezim = false
         prijateBody = 0
         odmietnuteBody = 0
@@ -131,10 +135,29 @@ class ZaznamJazdy(
         val novyBod = GpsBod(latitude, longitude, hodiny(), presnostMetre, rychlost)
 
         if (prvyBod == null) {
+            val predtym = kandidatZaciatku
             if (rychlost < RYCHLOST_START_METRE_ZA_SEKUNDU) {
-                // Zapamätáme si miesto pred rozbehom, aby jazde nechýbal úvodný úsek.
-                kandidatZaciatku = novyBod
-                return false
+                val posun = predtym?.let { vzdialenostMetre(it, novyBod) } ?: 0.0
+                val autoSaPohlo = predtym != null &&
+                    novyBod.casMillis - predtym.casMillis in 0..MAX_VEK_ZACIATKU_MILLIS &&
+                    posun > MIN_POSUN_ROZBEHU_METRE + predtym.presnostMetre + novyBod.presnostMetre
+                if (!autoSaPohlo) {
+                    // Zapamätáme si miesto pred rozbehom, aby jazde nechýbal úvodný úsek.
+                    kandidatZaciatku = novyBod
+                    return false
+                }
+                // Medzi dvoma bodmi (v úspornom režime minúta) sa auto rozbehlo
+                // a znova zastavilo, napr. na semafore: jazda začala na pôvodnom mieste.
+                kandidatZaciatku = null
+                prvyBod = predtym
+                poslednyBod = novyBod
+                pocetBodov = 2
+                prejdeneMetre = posun
+                poslednyPohybMillis = novyBod.casMillis
+                ukoncitUspornyRezim()
+                zaciatokZapisany = true
+                zapis("Jazda začala (auto sa medzi bodmi posunulo o ${posun.toInt()} m)")
+                return true
             }
             val kandidat = kandidatZaciatku
             kandidatZaciatku = null
@@ -168,10 +191,7 @@ class ZaznamJazdy(
         } else {
             prvyBod = novyBod
         }
-        if (uspornyRezim) {
-            uspornyRezim = false
-            zapis("Rozbeh zachytený v úspornom režime, GPS znova každých 10 s")
-        }
+        ukoncitUspornyRezim()
         if (!zaciatokZapisany) {
             zaciatokZapisany = true
             zapis("Jazda začala (rýchlosť ${kmh(rychlost)} km/h, presnosť ${presnostMetre.toInt()} m)")
@@ -180,6 +200,12 @@ class ZaznamJazdy(
         pocetBodov += 1
         if (rychlost >= RYCHLOST_POHYB_METRE_ZA_SEKUNDU) poslednyPohybMillis = novyBod.casMillis
         return true
+    }
+
+    private fun ukoncitUspornyRezim() {
+        if (!uspornyRezim) return
+        uspornyRezim = false
+        zapis("Rozbeh zachytený v úspornom režime, GPS znova každých 10 s")
     }
 
     /**
@@ -191,11 +217,14 @@ class ZaznamJazdy(
      */
     fun skontrolovat(istotaAuta: Int?): DovodKonca? {
         val teraz = hodiny()
-        val autoHlasene = istotaAuta != null && istotaAuta >= MINIMALNA_ISTOTA_AUTA
+        if (istotaAuta != null && istotaAuta >= MINIMALNA_ISTOTA_AUTA) autoHlaseneMillis = teraz
+        // Kratšie limity platia až po čase, keď Google naposledy hlásil auto:
+        // keď sa kolóna po dlhej zápche pohne, odhad Googlu môže na chvíľu klesnúť.
+        val odHlaseniaAuta = autoHlaseneMillis?.let { teraz - it } ?: Long.MAX_VALUE
         if (prvyBod == null) {
             val cakanie = teraz - spusteneMillis
             if (cakanie >= MAX_CAKANIE_NA_ROZBEH_MILLIS) return DovodKonca.ZIADNY_ROZBEH
-            val usporny = cakanie >= CAKANIE_NA_ROZBEH_MILLIS && !autoHlasene
+            val usporny = minOf(cakanie, odHlaseniaAuta) >= CAKANIE_NA_ROZBEH_MILLIS
             if (usporny != uspornyRezim) {
                 uspornyRezim = usporny
                 zapis(if (usporny) "Úsporný režim: auto stojí, GPS raz za minútu" else "Google hlási auto, GPS znova každých 10 s")
@@ -207,7 +236,7 @@ class ZaznamJazdy(
         val pohyb = poslednyPohybMillis ?: return null
         val bezPohybu = teraz - pohyb
         if (bezPohybu >= MAX_STATIE_MILLIS) return DovodKonca.BEZ_POHYBU
-        if (bezPohybu >= CAS_ZASTAVENIA_MILLIS && !autoHlasene) return DovodKonca.BEZ_POHYBU
+        if (minOf(bezPohybu, odHlaseniaAuta) >= CAS_ZASTAVENIA_MILLIS) return DovodKonca.BEZ_POHYBU
         return null
     }
 
@@ -229,6 +258,7 @@ class ZaznamJazdy(
         vystupilMillis = null
         zaciatokZapisany = false
         uspornyRezim = false
+        autoHlaseneMillis = null
         return jazda
     }
 
@@ -264,6 +294,12 @@ class ZaznamJazdy(
         const val CAS_PO_VYSTUPENI_MILLIS = 3 * 60 * 1_000L
         const val CAS_ZASTAVENIA_MILLIS = 20 * 60 * 1_000L
         const val MAX_STATIE_MILLIS = 45 * 60 * 1_000L
+
+        /**
+         * Posun „stojaceho“ auta (nad súčet nepresností bodov), ktorý znamená,
+         * že sa medzi dvoma GPS bodmi pohlo, hoci pri oboch stojí (semafor).
+         */
+        const val MIN_POSUN_ROZBEHU_METRE = 150.0
 
         /** Posledná poloha pred rozbehom sa použije ako začiatok jazdy, ak je čerstvá. */
         const val MAX_VEK_ZACIATKU_MILLIS = 3 * 60 * 1_000L

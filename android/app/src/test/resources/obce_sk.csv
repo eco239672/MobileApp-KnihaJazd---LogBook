@@ -1,0 +1,502 @@
+# 500 náhodne vybraných obcí a miest SR (zdroj: OpenStreetMap cez github.com/drakh/slovakia-gps-data)
+# nazov;okres;lat;lon
+Bratislava;Bratislava I;48.153538;17.109671
+Galanta;Galanta;48.191057;17.727778
+Nitra;Nitra;48.312570;18.090610
+Senec;Senec;48.219641;17.396776
+Šaľa;Šaľa;48.150995;17.876502
+Košice;Košice I;48.717227;21.249677
+Vráble;Nitra;48.244871;18.306572
+Hincovce;Spišská Nová Ves;48.966667;20.733333
+Bašovce;Piešťany;48.633100;17.797293
+Nálepkovo;Gelnica;48.850000;20.633333
+Hubová;Ružomberok;49.116667;19.183333
+Hôrky;Žilina;49.204807;18.693568
+Vrbnica;Michalovce;48.678000;21.883000
+Zdoba;Košice - okolie;48.705831;21.331779
+Šuja;Žilina;49.066667;18.633333
+Biskupice;Trenčín;48.880110;18.021383
+Zvolen - Lukové;Zvolen;48.604148;19.193455
+Smolnícka Huta;Gelnica;48.750000;20.783333
+Hraň;Trebišov;48.544342;21.787090
+Hostice;Rimavská Sobota;48.237280;20.066778
+Budča;Zvolen;48.574300;19.065196
+Hažín nad Cirochou;Humenné;48.929264;21.961729
+Bukovce;Stropkov;49.266000;21.712000
+Hronec;Brezno;48.802320;19.575561
+Nemecká;Brezno;48.815878;19.428319
+Hoste;Galanta;48.266667;17.633333
+Nevidzany;Prievidza;48.849049;18.483147
+Čižatice;Košice - okolie;48.795013;21.392715
+Konrádovce;Rimavská Sobota;48.299331;19.905062
+Mníšek nad Hnilcom;Gelnica;48.800000;20.800000
+Petrovice;Bytča;49.266667;18.533333
+Studienka;Malacky;48.528061;17.136328
+Dolné Lovčice;Trnava;48.366401;17.676151
+Drienovec;Košice - okolie;48.616667;20.950000
+Roštár;Rožňava;48.692241;20.346693
+Trnovo;Martin;49.016667;18.866667
+Malé Trakany;Trebišov;48.399997;22.116660
+Mokrý Háj;Skalica;48.810594;17.246132
+Jasenové;Žilina;49.110803;18.635969
+Slivník;Trebišov;48.601620;21.554455
+Železník;Svidník;49.094189;21.511049
+Súľov;Bytča;49.164975;18.587740
+Blahová;Dunajská Streda;48.086055;17.538421
+Čierny Brod;Galanta;48.151335;17.656030
+Veľké Uherce;Partizánske;48.613712;18.438069
+Jelšovce;Nitra;48.383709;18.056148
+Roškovce;Medzilaborce;49.239399;21.847816
+Maňa;Nové Zámky;48.153670;18.285713
+Vrbové;Piešťany;48.619531;17.723876
+Horné Orešany;Trnava;48.463689;17.439610
+Vydrany;Dunajská Streda;48.017034;17.585635
+Devičany;Levice;48.333333;18.716667
+Valaliky;Košice - okolie;48.641526;21.293130
+Vyšná Hutka;Košice - okolie;48.676525;21.354298
+Medzianky;Vranov nad Topľou;49.033333;21.466667
+Pohranice;Nitra;48.333333;18.183333
+Horné Obdokovce;Topoľčany;48.493402;18.045731
+Dargov;Trebišov;48.731780;21.586305
+Kobeliarovo;Rožňava;48.750000;20.366667
+Potvorice;Nové Mesto nad Váhom;48.688795;17.848570
+Slanská Huta;Košice - okolie;48.598815;21.464720
+Biskupice;Bánovce nad Bebravou;48.710591;18.236279
+Rakytník;Rimavská Sobota;48.392000;20.175000
+Čertižné;Medzilaborce;49.350000;21.833333
+Bretejovce;Prešov;48.826987;21.297110
+Pravenec;Prievidza;48.854234;18.649962
+Vavrišovo;Liptovský Mikuláš;49.070318;19.758875
+Štiavnik;Bytča;49.248799;18.462837
+Dobroč;Lučenec;48.475142;19.566196
+Hencovce;Vranov nad Topľou;48.871820;21.729457
+Papradno;Považská Bystrica;49.231225;18.409116
+Bory;Levice;48.180250;18.744549
+Kamenica;Sabinov;49.192769;20.960827
+Banská Bystrica - Sásová;Banská Bystrica;48.756802;19.163797
+Jasenie;Brezno;48.835641;19.461292
+Veselé;Piešťany;48.550000;17.733333
+Ilija;Banská Štiavnica;48.419772;18.900360
+Holiša;Lučenec;48.308081;19.751639
+Záskalie;Považská Bystrica;49.137002;18.516901
+Strelníky;Banská Bystrica;48.721553;19.394396
+Chmeľová;Bardejov;49.400000;21.300000
+Liptovská Porúbka;Liptovský Mikuláš;49.033333;19.750000
+Dražice;Rimavská Sobota;48.433333;20.066667
+Malé Ozorovce;Trebišov;48.683333;21.616667
+Malá Mača;Galanta;48.223258;17.638420
+Ábelová;Lučenec;48.410484;19.431923
+Porúbka;Humenné;48.870685;21.954197
+Čakanovce;Lučenec;48.214204;19.812997
+Brestovany;Trnava;48.385557;17.690227
+Stará Myjava;Myjava;48.788198;17.584926
+Dúbrava;Levoča;48.995497;20.849898
+Kalonda;Lučenec;48.257946;19.656198
+Senné;Veľký Krtíš;48.308870;19.395670
+Lošonec;Trnava;48.483333;17.400000
+Nemečky;Topoľčany;48.670804;18.115312
+Slovinky;Spišská Nová Ves;48.880296;20.844154
+Zbehy;Piešťany;48.666667;17.683333
+Borová;Trnava;48.386687;17.444730
+Ždiar;Poprad;49.270862;20.271761
+Dolné Lefantovce;Nitra;48.416667;18.116667
+Studená;Rimavská Sobota;48.159472;19.959530
+Hontianske Nemce;Krupina;48.285230;18.988600
+Istebné;Dolný Kubín;49.213826;19.221751
+Kubáňovo;Levice;48.058713;18.808180
+Štrkovec;Rimavská Sobota;48.359802;20.324131
+Hronská Breznica;Zvolen;48.568789;18.997611
+Brunovce;Nové Mesto nad Váhom;48.672497;17.855017
+Koromľa;Sobrance;48.716667;22.300000
+Vyšné Ladičkovce;Humenné;49.033333;21.900000
+Vechec;Vranov nad Topľou;48.866667;21.633333
+Bzince pod Javorinou;Nové Mesto nad Váhom;48.786735;17.771587
+Kálnica;Nové Mesto nad Váhom;48.764557;17.927848
+Olšovany;Košice - okolie;48.705085;21.412540
+Ráztočno;Prievidza;48.768838;18.755309
+Dolný Harmanec;Banská Bystrica;48.815627;19.050931
+Hromoš;Stará Ľubovňa;49.250000;20.800000
+Sládkovičovo;Galanta;48.208208;17.644866
+Reca;Senec;48.232927;17.449171
+Veterná Poruba;Liptovský Mikuláš;49.116667;19.683333
+Malá Tŕňa;Trebišov;48.450000;21.683333
+České Brezovo;Poltár;48.480880;19.803887
+Mníšek nad Popradom;Stará Ľubovňa;49.416667;20.716667
+Čebovce;Veľký Krtíš;48.180311;19.228819
+Richnava;Gelnica;48.927875;20.917469
+Pohorelá;Brezno;48.854596;20.010070
+Mlynky;Spišská Nová Ves;48.851835;20.428936
+Adamovské Kochanovce;Trenčín;48.853000;17.925000
+Svrbice;Topoľčany;48.519926;17.882809
+Fekišovce;Sobrance;48.771672;22.085743
+Ostratice;Partizánske;48.644000;18.281000
+Socovce;Martin;48.950000;18.866667
+Poltár;Poltár;48.432586;19.793827
+Čaňa;Košice - okolie;48.609730;21.325644
+Pukanec;Levice;48.350081;18.720879
+Ostrov;Sobrance;48.716667;22.166667
+Veľká Čausa;Prievidza;48.776114;18.698372
+Stankovany;Ružomberok;49.150000;19.183333
+Horné Otrokovce;Hlohovec;48.490563;17.881244
+Bohatá;Komárno;47.887709;18.201948
+Čeľadince;Topoľčany;48.512554;18.171637
+Hradná;Bytča;49.136310;18.592065
+Sebedín - Bečov časť Sebedín;Banská Bystrica;48.636280;19.240031
+Uhrovec;Bánovce nad Bebravou;48.750000;18.333333
+Šimonovce;Rimavská Sobota;48.272799;20.112205
+Štôla;Poprad;49.091252;20.142140
+Jelka;Galanta;48.143780;17.511306
+Beckov;Nové Mesto nad Váhom;48.788242;17.896478
+None;Zlaté Moravce;48.388406;18.325367
+Merník;Vranov nad Topľou;48.950000;21.650000
+Abovce;Rimavská Sobota;48.319223;20.337689
+Diaková;Martin;49.049887;18.966409
+Malé Zálužie;Nitra;48.440160;17.985146
+Kechnec;Košice - okolie;48.555456;21.259681
+Krškany;Levice;48.221253;18.670036
+Veľké Chlievany;Bánovce nad Bebravou;48.703784;18.224509
+Kvetoslavov;Dunajská Streda;48.052745;17.352638
+Príbelce;Veľký Krtíš;48.195658;19.257227
+Malé Dvorníky;Dunajská Streda;48.009186;17.642192
+Dolný Pial;Levice;48.132012;18.461116
+Neporadza;Trenčín;48.811077;18.159628
+Vištuk;Pezinok;48.334375;17.397091
+Pleš;Lučenec;48.231973;19.749213
+Drietoma;Trenčín;48.900000;17.950000
+Nižná Voľa;Bardejov;49.216667;21.366667
+Dubnica nad Váhom;Ilava;48.957172;18.167022
+Bukovec;Košice - okolie;48.710641;21.149304
+Bátorove Kosihy;Komárno;47.833333;18.416667
+Slatvina;Spišská Nová Ves;48.966667;20.850000
+Mašková;Lučenec;48.333370;19.564169
+Stará Lesná;Kežmarok;49.135771;20.305464
+Topoľčianky;Zlaté Moravce;48.420271;18.410113
+Revúcka Lehota;Revúca;48.672088;20.181010
+Pavlovce;Rimavská Sobota;48.326338;20.081476
+Hviezdoslavov;Dunajská Streda;48.066938;17.348981
+Čierna;Trebišov;48.430000;22.110000
+Čakany;Dunajská Streda;48.116035;17.364737
+Zemplínske Hradište;Trebišov;48.583333;21.733333
+Bajka;Levice;48.150000;18.516667
+Rajčany;Topoľčany;48.613424;18.234968
+Čierne nad Topľou;Vranov nad Topľou;49.000000;21.566667
+Harhaj;Bardejov;49.183333;21.416667
+Kaplna;Senec;48.296525;17.452745
+Somotor;Trebišov;48.400000;21.816667
+Bohdanovce nad Trnavou;Trnava;48.425115;17.548934
+Závažná Poruba;Liptovský Mikuláš;49.055604;19.649302
+Pašková;Rožňava;48.591905;20.383681
+Horné Semerovce;Levice;48.124220;18.877946
+Borčany;Bánovce nad Bebravou;48.656379;18.219376
+Raková;Čadca;49.450000;18.733333
+Semerovo;Nové Zámky;48.016667;18.350000
+Banská Belá;Banská Štiavnica;48.473282;18.939332
+Malatíny;Liptovský Mikuláš;49.058176;19.456153
+Hodruša - Hámre;Žarnovica;48.452641;18.801551
+Horný Tisovník;Detva;48.416609;19.362123
+Veľké Vozokany;Zlaté Moravce;48.316667;18.416667
+Kusín;Michalovce;48.816667;22.066667
+Pusté Čemerné;Michalovce;48.850000;21.816667
+Giraltovce;Svidník;49.116295;21.517528
+Bretka;Rožňava;48.484474;20.350786
+Bajany;Michalovce;48.600000;22.116667
+Horné Pršany;Banská Bystrica;48.700000;19.083333
+Košeca;Ilava;49.016667;18.266667
+Banská Bystrica - Šalková;Banská Bystrica;48.743077;19.217147
+Malá Domaša;Vranov nad Topľou;48.970607;21.710411
+Baldovce;Levoča;48.983333;20.716667
+Vyšná Voľa;Bardejov;49.250000;21.366667
+Kožuchov;Trebišov;48.566667;21.724590
+Paňovce;Košice - okolie;48.643215;21.066056
+Veľká nad Ipľom;Lučenec;48.263708;19.619042
+Staré Hory;Banská Bystrica;48.834351;19.113819
+Sološnica;Malacky;48.465196;17.231969
+Mojš;Žilina;49.200755;18.821196
+Halič;Lučenec;48.354442;19.573333
+Prestavlky;Žiar nad Hronom;48.587058;18.760444
+Bôrka;Rožňava;48.631000;20.764000
+Šarišské Sokolovce;Sabinov;49.106523;21.166620
+Radošovce;Skalica;48.766667;17.283333
+Lemešany;Prešov;48.851165;21.271969
+Rabčice;Námestovo;49.500000;19.533333
+Vlková;Kežmarok;49.083333;20.433333
+Bodiná;Považská Bystrica;49.106735;18.557058
+Sečovská Polianka;Vranov nad Topľou;48.783727;21.680046
+Bystrička;Martin;49.050000;18.883333
+Kazimír;Trebišov;48.527000;21.584000
+Modra;Pezinok;48.336443;17.308037
+Janovík;Prešov;48.836322;21.285065
+Dolná Ždaňa;Žiar nad Hronom;48.547275;18.761934
+Budiš;Turčianske Teplice;48.871863;18.756668
+Hrabovec nad Laborcom;Humenné;49.096680;21.940568
+Krpeľany;Martin;49.123576;19.080525
+Fričkovce;Bardejov;49.183333;21.250000
+Výčapy - Opatovce;Nitra;48.411548;18.083438
+Žilina;Žilina;49.223464;18.739498
+Veľké Ozorovce;Trebišov;48.666667;21.616667
+None;Trenčín;48.876114;18.004749
+Vajkovce;Košice - okolie;48.783028;21.322383
+Motešice;Trenčín;48.842000;18.183000
+Uličské Krivé;Snina;48.994921;22.439725
+Veľopolie;Humenné;48.992992;21.954743
+Horná Poruba;Ilava;48.950000;18.300000
+Tehla;Levice;48.183333;18.383333
+Jastrabie pri Michalovciach;Michalovce;48.714000;22.030000
+Leles;Trebišov;48.466667;22.033333
+Torysky;Levoča;49.100000;20.683333
+Bunkovce;Sobrance;48.716667;22.116667
+Lubina;Nové Mesto nad Váhom;48.783333;17.733333
+Lascov;Bardejov;49.166667;21.483333
+Podhradie;Prievidza;48.683831;18.632348
+Miklušovce;Prešov;48.917549;21.080649
+Dolný Kubín;Dolný Kubín;49.218073;19.295390
+Slovenská Ves;Kežmarok;49.233333;20.433333
+Gabčíkovo;Dunajská Streda;47.895106;17.578125
+Bušovce;Kežmarok;49.218898;20.489855
+Dúbrava;Ružomberok;48.978616;19.157781
+Plavnica;Stará Ľubovňa;49.270356;20.772951
+Lipovany;Lučenec;48.220006;19.707683
+Gortva;Rimavská Sobota;48.294820;20.024665
+Žlkovce;Hlohovec;48.458194;17.715681
+Podhradík;Prešov;49.005414;21.345595
+Ptičie;Humenné;48.904881;21.958319
+Blesovce;Topoľčany;48.557900;18.039446
+Michal na Ostrove;Dunajská Streda;48.024196;17.511429
+Krupina;Krupina;48.352728;19.069182
+Hamuliakovo;Senec;48.036541;17.251838
+Šarišské Dravce;Sabinov;49.174537;20.867210
+Rumanová;Nitra;48.329679;17.870811
+Nová Ľubovňa;Stará Ľubovňa;49.266667;20.683333
+Doľany;Levoča;49.016524;20.666809
+Smrečany;Liptovský Mikuláš;49.116667;19.650000
+Zliechov;Ilava;48.950000;18.433333
+Cakov;Rimavská Sobota;48.340733;20.226883
+Vrícko;Martin;48.971288;18.699780
+Visolaje;Púchov;49.066662;18.366662
+Štefanová;Pezinok;48.384317;17.398454
+Lúčky;Ružomberok;49.128053;19.403636
+Ľubochňa;Ružomberok;49.116667;19.166667
+Hajná Nová Ves;Topoľčany;48.535465;18.031973
+Pavlová;Nové Zámky;47.900000;18.666667
+Nitrianske Sučany;Prievidza;48.732646;18.468924
+Krajná Bystrá;Svidník;49.383333;21.683333
+Lipovník;Rožňava;48.628984;20.620718
+Budkovce;Michalovce;48.633333;21.933333
+Machulince;Zlaté Moravce;48.411250;18.433242
+Malá Hradná;Bánovce nad Bebravou;48.760078;18.164661
+Revúca;Revúca;48.683333;20.116667
+Stráža;Žilina;49.233333;18.916667
+Brezina;Trebišov;48.550000;21.566667
+Krčava;Sobrance;48.668646;22.245739
+Petrovce;Vranov nad Topľou;49.004434;21.486511
+Orešany;Topoľčany;48.510606;17.901850
+Chudá Lehota;Bánovce nad Bebravou;48.646756;18.198307
+Kamienka;Humenné;48.905796;21.999438
+Hosťová;Nitra;48.333333;18.216667
+Gaboltov;Bardejov;49.366667;21.150000
+Vyšné Valice;Rimavská Sobota;48.455031;20.191777
+Priepasné časť Dlhý Vŕšok;Myjava;48.691918;17.593220
+Lesíček;Prešov;48.915895;21.381488
+Dravce;Levoča;49.016667;20.483333
+Kovarce;Topoľčany;48.496327;18.158903
+Kapišová;Svidník;49.333333;21.600000
+Streženice;Púchov;49.100000;18.300000
+Laškovce;Michalovce;48.700000;21.850000
+Tlmače;Levice;48.292155;18.543288
+Kostolec;Považská Bystrica;49.127909;18.531746
+Velušovce;Topoľčany;48.631125;18.099332
+Hubina;Piešťany;48.618016;17.886407
+Oľšavica;Levoča;49.083333;20.750000
+Klokočov;Michalovce;48.816653;22.033325
+Povoda;Dunajská Streda;47.973124;17.638638
+Mýtna;Lučenec;48.467096;19.552571
+Zacharovce;Rimavská Sobota;48.406838;20.052468
+Čermany;Topoľčany;48.469301;18.025116
+Veľké Kozmálovce;Levice;48.271255;18.540340
+Martin nad Žitavou;Zlaté Moravce;48.397000;18.355000
+Ludanice;Topoľčany;48.501468;18.120379
+Jasová;Nové Zámky;47.986648;18.398499
+Poprad;Poprad;49.054152;20.297640
+Solčany;Topoľčany;48.533333;18.200000
+Strážske;Michalovce;48.875059;21.834151
+Ložín;Michalovce;48.661140;21.837806
+Radošovce;Trnava;48.503325;17.632471
+Stakčínska Roztoka;Snina;49.001389;22.282062
+Harichovce;Spišská Nová Ves;48.966667;20.583333
+Richvald;Bardejov;49.283333;21.200000
+Mýto pod Ďumbierom;Brezno;48.853912;19.633257
+Kokošovce;Prešov;48.950000;21.333333
+Drienov;Prešov;48.874168;21.270189
+Gajary;Malacky;48.468407;16.922298
+Nadlice;Partizánske;48.616776;18.251694
+Banka;Piešťany;48.583300;17.850111
+Figa;Rimavská Sobota;48.397213;20.251904
+Kalinkovo;Senec;48.059606;17.250355
+Veľká Lodina;Košice - okolie;48.859586;21.156293
+Okružná;Prešov;49.035005;21.386811
+Vítkovce;Spišská Nová Ves;48.933333;20.733333
+Župčany;Prešov;49.011062;21.158732
+Dubové;Zvolen;48.505076;19.046475
+Rajec;Žilina;49.087947;18.636664
+Sirník;Michalovce;48.516667;21.816667
+Hvozdnica;Bytča;49.216667;18.483333
+Veľký Lom;Veľký Krtíš;48.338786;19.370755
+Ivanka pri Nitre;Nitra;48.233333;18.116667
+Kristy;Sobrance;48.683333;22.183333
+Šarišské Jastrabie;Stará Ľubovňa;49.245180;20.909529
+Stará Bystrica;Čadca;49.346165;18.937619
+Šterusy;Piešťany;48.601185;17.678740
+Kľačno;Prievidza;48.912701;18.659298
+Bystré;Vranov nad Topľou;49.016667;21.550000
+Široké;Prešov;48.997462;20.939056
+Chotín;Komárno;47.812336;18.219982
+Mojtín;Púchov;48.983333;18.416667
+Muránska Dlhá Lúka;Revúca;48.717685;20.081168
+Radava;Nové Zámky;48.096048;18.299187
+Kaluža;Michalovce;48.816667;22.000000
+Čamovce;Lučenec;48.249145;19.887084
+Žaškov;Dolný Kubín;49.166667;19.216667
+Dlhá nad Váhom;Šaľa;48.171567;17.860896
+Rudník;Košice - okolie;48.688947;21.009475
+Nýrovce;Levice;48.016667;18.583333
+Zemplínske Hámre;Snina;48.949527;22.156555
+Sulín;Stará Ľubovňa;49.362924;20.754547
+Kalinčiakovo;Levice;48.200867;18.659105
+Stropkov - Sitníky;Stropkov;49.179696;21.660932
+Čaklov;Vranov nad Topľou;48.900000;21.633333
+Michalovce;Michalovce;48.750000;21.933333
+Nová Ves nad Váhom;Nové Mesto nad Váhom;48.733595;17.887916
+Zubák;Púchov;49.150000;18.216667
+Valaškovce (vojenský obvod);Humenné;48.918213;22.086639
+Vyšné Ružbachy;Stará Ľubovňa;49.304264;20.564859
+Kostolné;Myjava;48.736145;17.703515
+Strečno;Žilina;49.188434;18.865599
+Forbasy;Stará Ľubovňa;49.300000;20.616667
+Veľký Folkmar;Gelnica;48.857416;21.014675
+Betliar;Rožňava;48.703209;20.505559
+Pitelová;Žiar nad Hronom;48.597897;18.927867
+Pastovce;Levice;47.966969;18.758847
+Dolné Kočkovce;Púchov;49.093496;18.324426
+Kalameny;Ružomberok;49.125971;19.414226
+Vyšná Olšava;Stropkov;49.166667;21.600000
+Ráztoka;Brezno;48.820557;19.401296
+Čab;Nitra;48.396155;18.002955
+Borský Peter;Senica;48.634915;17.217839
+Melčice - Lieskové;Trenčín;48.840430;17.909946
+Veľký Lapáš;Nitra;48.291651;18.184747
+Voľa;Michalovce;48.850000;21.850000
+Holice;Dunajská Streda;47.992973;17.483128
+Nolčovo;Martin;49.108334;19.078405
+Vernár;Poprad;48.918101;20.270547
+Liptovský Michal;Ružomberok;49.092964;19.441510
+Rohov;Senica;48.733333;17.350000
+Prusy;Bánovce nad Bebravou;48.758555;18.260143
+Ladomirová;Svidník;49.333333;21.633333
+Malé Raškovce;Michalovce;48.566667;21.916667
+Dolná Lehota;Brezno;48.837376;19.508521
+Rumince;Rimavská Sobota;48.370879;20.286923
+Svätoplukovo;Nitra;48.233333;18.050000
+Medzilaborce;Medzilaborce;49.271132;21.903965
+Obišovce;Košice - okolie;48.863008;21.235978
+Mútne;Námestovo;49.460761;19.323235
+Roztoky;Svidník;49.383333;21.483333
+Havaj;Stropkov;49.255347;21.784463
+Hanušovce nad Topľou;Vranov nad Topľou;49.033333;21.500000
+Čalovec;Komárno;47.812935;17.989557
+Nižný Slavkov;Sabinov;49.100000;20.850000
+Ďanová;Martin;48.983333;18.916667
+Krížovany;Prešov;48.983333;21.050000
+Rimavské Brezovo;Rimavská Sobota;48.538089;19.958248
+Závadka;Prešov;49.150000;21.250000
+Beňatina;Sobrance;48.816667;22.333333
+Veľké Kostoľany;Piešťany;48.506185;17.726713
+Lubeník;Revúca;48.656262;20.184780
+Klieština;Považská Bystrica;49.183333;18.350000
+Gemerský Sad;Revúca;48.578765;20.325737
+Širkovce;Rimavská Sobota;48.290914;20.085252
+Vrbovka;Veľký Krtíš;48.089918;19.408517
+Ladice;Zlaté Moravce;48.400000;18.266667
+Belá;Žilina;49.236895;18.943661
+Košariská;Myjava;48.673472;17.589761
+Cigeľ;Prievidza;48.716667;18.650000
+Plášťovce;Levice;48.159298;18.977513
+Naháč;Trnava;48.533333;17.533333
+Hájske;Šaľa;48.255590;17.867951
+Opatovská Nová Ves;Veľký Krtíš;48.114507;19.276443
+Sokolovce;Piešťany;48.538983;17.843424
+Zemné;Nové Zámky;47.987724;17.994901
+Poliakovce;Bardejov;49.250000;21.416667
+Dukovce;Svidník;49.116667;21.416667
+Stará Halič;Lučenec;48.366572;19.573840
+Horná Breznica;Púchov;49.116667;18.250000
+Podkriváň;Detva;48.514195;19.457072
+Mlynčeky;Kežmarok;49.166667;20.383333
+Oravská Jasenica;Námestovo;49.390418;19.435844
+Holumnica;Kežmarok;49.233333;20.533333
+Trenč;Lučenec;48.224608;19.578730
+Kostolište;Malacky;48.445199;16.987039
+Brezov;Bardejov;49.150000;21.500000
+Dobrá Voda;Trnava;48.596678;17.541932
+Most pri Bratislave;Senec;48.139812;17.268859
+Janovce;Bardejov;49.183333;21.300000
+Čabiny;Medzilaborce;49.182000;21.901000
+Dvory nad Žitavou;Nové Zámky;47.994311;18.268975
+Malužiná;Liptovský Mikuláš;48.982891;19.763678
+Petrovce;Rimavská Sobota;48.186910;20.020085
+Majerovce;Vranov nad Topľou;48.900000;21.716667
+Veľké Orvište;Piešťany;48.616667;17.800000
+Limbach;Pezinok;48.290714;17.218400
+Vyšný Slavkov;Levoča;49.066667;20.866667
+Beluša;Púchov;49.066667;18.333333
+Dolné Saliby;Galanta;48.105844;17.781458
+Hostovice;Snina;49.119134;22.144185
+Kráľová nad Váhom;Šaľa;48.167655;17.843129
+Malinová;Prievidza;48.854386;18.614713
+Bystričany;Prievidza;48.660042;18.513587
+Kolačno;Partizánske;48.599908;18.433380
+Predajná;Brezno;48.813419;19.462852
+Muráň;Revúca;48.740328;20.046961
+Štós;Košice - okolie;48.709272;20.786871
+Bánovce nad Bebravou;Bánovce nad Bebravou;48.721667;18.259826
+Adidovce;Humenné;49.016066;22.037749
+Klokočov;Čadca;49.446206;18.567083
+Silická Jablonica;Rožňava;48.566667;20.616667
+Buzica;Košice - okolie;48.531647;21.077111
+Mojmírovce;Nitra;48.213314;18.064323
+Liptovská Štiavnica;Ružomberok;49.050000;19.366667
+Partizánske;Partizánske;48.627231;18.365466
+Jastrabie nad Topľou;Vranov nad Topľou;48.940000;21.604000
+Ľubotín;Stará Ľubovňa;49.261290;20.876288
+Olováry;Veľký Krtíš;48.152991;19.409513
+Rišňovce;Nitra;48.369248;17.896178
+Kečkovce;Svidník;49.383333;21.516667
+Záhradné;Prešov;49.083333;21.266667
+Lovčica - Trubín;Žiar nad Hronom;48.614073;18.783059
+Oravská Polhora;Námestovo;49.516667;19.450000
+Ružindol;Trnava;48.368943;17.496541
+Tôň;Komárno;47.804701;17.838094
+Lúčky;Michalovce;48.769111;22.041781
+Krakovany;Piešťany;48.610508;17.749666
+Kúty;Senica;48.666667;17.016667
+Petrovce nad Laborcom;Michalovce;48.793470;21.872618
+Tarnov;Bardejov;49.316667;21.166667
+Trenčianske Jastrabie;Trenčín;48.800097;18.115452
+Tulčík;Prešov;49.088211;21.305265
+Kleňany;Veľký Krtíš;48.117645;19.073115
+Mankovce;Zlaté Moravce;48.429145;18.328712
+Slanec;Košice - okolie;48.636466;21.478838
+Čierna Lehota;Rožňava;48.733333;20.250000
+Jaklovce;Gelnica;48.873225;20.995106
+Jatov;Nové Zámky;48.128462;18.028264
+Rimavská Baňa;Rimavská Sobota;48.511071;19.941576
+Medzibrod;Banská Bystrica;48.793399;19.357108
+Modrová;Nové Mesto nad Váhom;48.644488;17.895336
+Zvolenská Slatina;Zvolen;48.560709;19.260067
+Nová Dubnica;Ilava;48.940148;18.145837
+Šurice;Lučenec;48.230600;19.913909
+Pohronská Polhora;Brezno;48.756931;19.794895
+Malý Slavkov;Kežmarok;49.137202;20.388096
+Terňa;Prešov;49.116667;21.233333
+Bojničky;Hlohovec;48.395727;17.799799
+Bidovce;Košice - okolie;48.736152;21.438318
+Hažlín;Bardejov;49.300000;21.433333
