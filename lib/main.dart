@@ -392,7 +392,13 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     } catch (chyba) {
       // Zmeny ostávajú v telefóne označené na odoslanie; skúsi sa to znova
       // pri návrate do aplikácie, po ďalšej zmene alebo o 10 minút.
-      _zapisatDiagnostiku('Synchronizácia s cloudom zlyhala: ${chyba.runtimeType}');
+      final popis = chyba is FirebaseException
+          ? '${chyba.plugin}/${chyba.code}: ${chyba.message ?? ''}'
+          : '$chyba';
+      _zapisatDiagnostiku(
+        'Synchronizácia s cloudom zlyhala: '
+        '${popis.length > 200 ? popis.substring(0, 200) : popis}',
+      );
     }
   }
 
@@ -595,6 +601,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                 onVypnutRozpoznavanie: _vypnutRozpoznavanie,
                 onObnovitRozpoznavanie: _obnovitRozpoznavanie,
                 onPovolitNotifikacie: _rozpoznavanieAktivity.povolitNotifikacie,
+                onOtvoritUsporuBaterie: _rozpoznavanieAktivity.otvoritUsporuBaterie,
                 onNacitatDiagnostiku: _rozpoznavanieAktivity.nacitatDiagnostiku,
                 onVymazatDiagnostiku: _rozpoznavanieAktivity.vymazatDiagnostiku,
                 onZistitStavRozpoznavania: _rozpoznavanieAktivity.zistitStav,

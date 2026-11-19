@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -65,6 +66,7 @@ class MainActivity : FlutterActivity() {
                     }
                     "otvoritNastaveniaPolohy" -> otvoritNastaveniaPolohy(result)
                     "povolitNotifikacie" -> povolitNotifikacie(result)
+                    "otvoritUsporuBaterie" -> otvoritUsporuBaterie(result)
                     "nacitatDiagnostiku" -> result.success(Diagnostika.nacitat(this))
                     "vymazatDiagnostiku" -> {
                         Diagnostika.vymazat(this)
@@ -106,6 +108,8 @@ class MainActivity : FlutterActivity() {
             ),
             "polohaNaPozadiPovolena" to GpsSledovanieService.maPovoleniePolohyNaPozadi(this),
             "notifikaciePovolene" to NotificationManagerCompat.from(this).areNotificationsEnabled(),
+            "usporaBaterieVypnuta" to getSystemService(PowerManager::class.java)
+                .isIgnoringBatteryOptimizations(packageName),
         )
     }
 
@@ -229,6 +233,24 @@ class MainActivity : FlutterActivity() {
         }
         otvoritNastaveniaNotifikacii()
         result.success(false)
+    }
+
+    /**
+     * Zoznam aplikácií v optimalizácii batérie. Optimalizovanú aplikáciu
+     * Android uspí a nedoručí jej ani udalosti „v aute“ (overené na Ulefone).
+     */
+    private fun otvoritUsporuBaterie(result: MethodChannel.Result) {
+        try {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        } catch (_: Exception) {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", packageName, null),
+                ),
+            )
+        }
+        result.success(null)
     }
 
     private fun otvoritNastaveniaNotifikacii() {

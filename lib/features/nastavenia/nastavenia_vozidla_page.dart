@@ -16,6 +16,7 @@ class NastaveniaVozidlaPage extends StatefulWidget {
     required this.onVypnutRozpoznavanie,
     required this.onObnovitRozpoznavanie,
     required this.onPovolitNotifikacie,
+    required this.onOtvoritUsporuBaterie,
     required this.onNacitatDiagnostiku,
     required this.onVymazatDiagnostiku,
     required this.onZistitStavRozpoznavania,
@@ -36,6 +37,7 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   /// Tichá obnova registrácie bez systémových dialógov (po návrate do aplikácie).
   final Future<StavRozpoznavaniaAktivity> Function() onObnovitRozpoznavanie;
   final Future<StavRozpoznavaniaAktivity> Function() onPovolitNotifikacie;
+  final Future<void> Function() onOtvoritUsporuBaterie;
   final Future<String> Function() onNacitatDiagnostiku;
   final Future<void> Function() onVymazatDiagnostiku;
   final Future<StavRozpoznavaniaAktivity> Function() onZistitStavRozpoznavania;
@@ -568,6 +570,22 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                         : const Icon(Icons.location_on_outlined),
                     label: const Text('Otvoriť nastavenia polohy'),
                   ),
+                if (_stavRozpoznavania?.aktivne == true &&
+                    _stavRozpoznavania?.usporaBaterieVypnuta == false) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Úspora batérie môže aplikáciu uspať a jazda sa nezaznamená. V zozname vyber Kniha jázd a zvoľ „Neoptimalizovať“ (alebo „Bez obmedzení“).',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: widget.onOtvoritUsporuBaterie,
+                    icon: const Icon(Icons.battery_alert_outlined),
+                    label: const Text('Vypnúť úsporu batérie'),
+                  ),
+                ],
                 if (_stavRozpoznavania?.aktivne == true &&
                     _stavRozpoznavania?.notifikaciePovolene == false) ...[
                   const SizedBox(height: 12),

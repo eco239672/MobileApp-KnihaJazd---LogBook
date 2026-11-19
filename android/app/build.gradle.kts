@@ -51,4 +51,6 @@ flutter {
 
 dependencies {
     implementation("com.google.android.gms:play-services-location:21.4.0")
+    // Simulácie jázd na počítači (src/test): .\gradlew.bat :app:testDebugUnitTest
+    testImplementation("junit:junit:4.13.2")
 }

@@ -69,6 +69,7 @@ class RozpoznavanieAktivityReceiver : BroadcastReceiver() {
      */
     private fun spracovatPriebeznuAktivitu(context: Context, intent: Intent) {
         val result = ActivityRecognitionResult.extractResult(intent) ?: return
+        ulozitPoslednyOdhad(context, result)
         zapisatOdhad(context, result)
         val vAute = result.probableActivities.any {
             it.type == DetectedActivity.IN_VEHICLE && it.confidence >= MINIMALNA_ISTOTA_VOZIDLA
@@ -102,12 +103,33 @@ class RozpoznavanieAktivityReceiver : BroadcastReceiver() {
             )
             Diagnostika.zapisat(context, "Žiadosť o spustenie GPS ($zdroj) odoslaná")
         } catch (chyba: Exception) {
-            // Android 12+ môže spustenie služby z pozadia zakázať.
-            Diagnostika.zapisat(
-                context,
-                "Spustenie GPS ($zdroj) ODMIETNUTÉ: ${Diagnostika.popisChyby(chyba)}",
-            )
+            // Android 12+ zakazuje spustiť službu z pozadia pri priebežnom
+            // odhade. Sledovanie sa potom spustí pri najbližšej udalosti
+            // „nastúpil/vystúpil“, ktorú Android povoľuje. Do záznamu to
+            // stačí napísať raz za 10 minút.
+            val preferencie = context.getSharedPreferences(PREFERENCIE, Context.MODE_PRIVATE)
+            val teraz = System.currentTimeMillis()
+            if (teraz - preferencie.getLong(KLUC_POSLEDNE_ODMIETNUTIE, 0L) >= 10 * 60_000L) {
+                preferencie.edit().putLong(KLUC_POSLEDNE_ODMIETNUTIE, teraz).apply()
+                Diagnostika.zapisat(
+                    context,
+                    "Spustenie GPS ($zdroj) odmietnuté systémom, počkám na udalosť auta: " +
+                        Diagnostika.popisChyby(chyba),
+                )
+            }
         }
+    }
+
+    /** Posledný odhad „v aute“ s časom; GPS služba podľa neho posudzuje „vystúpil z auta“. */
+    private fun ulozitPoslednyOdhad(context: Context, result: ActivityRecognitionResult) {
+        val istotaAuta = result.probableActivities
+            .firstOrNull { it.type == DetectedActivity.IN_VEHICLE }
+            ?.confidence ?: 0
+        context.getSharedPreferences(PREFERENCIE, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KLUC_ODHAD_AUTO_ISTOTA, istotaAuta)
+            .putLong(KLUC_ODHAD_CAS, System.currentTimeMillis())
+            .apply()
     }
 
     /**
@@ -128,12 +150,16 @@ class RozpoznavanieAktivityReceiver : BroadcastReceiver() {
             context,
             "Odhad pohybu: ${Diagnostika.nazovAktivity(najpravdepodobnejsia.type)} " +
                 "${najpravdepodobnejsia.confidence} %" +
-                (auto?.let { ", v aute ${it.confidence} %" } ?: ""),
+                (auto?.takeIf { it.type != najpravdepodobnejsia.type }
+                    ?.let { ", v aute ${it.confidence} %" } ?: ""),
         )
     }
 
     companion object {
         private const val KLUC_POSLEDNY_ODHAD = "posledny_odhad"
+        private const val KLUC_POSLEDNE_ODMIETNUTIE = "posledne_odmietnutie"
+        const val KLUC_ODHAD_AUTO_ISTOTA = "odhad_auto_istota"
+        const val KLUC_ODHAD_CAS = "odhad_cas"
         const val PREFERENCIE = "rozpoznavanie_aktivity"
         const val KLUC_V_AUTE = "v_aute"
         const val AKCIA_STAV_AKTIVITY = "sk.knihajazd.kniha_jazd.STAV_AKTIVITY"

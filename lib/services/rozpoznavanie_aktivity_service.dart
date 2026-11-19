@@ -32,6 +32,7 @@ class RozpoznavanieAktivityService {
       polohaNaPozadiPovolena: odpoved?['polohaNaPozadiPovolena'] == true,
       // Staršia natívna časť túto hodnotu nemusí poslať: vtedy nič nehlásime.
       notifikaciePovolene: odpoved?['notifikaciePovolene'] != false,
+      usporaBaterieVypnuta: odpoved?['usporaBaterieVypnuta'] != false,
     );
   }
 
@@ -55,6 +56,10 @@ class RozpoznavanieAktivityService {
     return zistitStav();
   }
 
+  /// Otvorí systémový zoznam optimalizácie batérie.
+  Future<void> otvoritUsporuBaterie() =>
+      _kanal.invokeMethod<void>('otvoritUsporuBaterie');
+
   // --- diagnostický záznam (ukladá ho natívna časť v telefóne) ---
 
   Future<String> nacitatDiagnostiku() async =>
@@ -74,6 +79,7 @@ class StavRozpoznavaniaAktivity {
     required this.vAute,
     required this.polohaNaPozadiPovolena,
     this.notifikaciePovolene = true,
+    this.usporaBaterieVypnuta = true,
   });
 
   final bool povolene;
@@ -81,6 +87,9 @@ class StavRozpoznavaniaAktivity {
   final bool vAute;
   final bool polohaNaPozadiPovolena;
   final bool notifikaciePovolene;
+
+  /// false = Android aplikáciu optimalizuje a môže ju na pozadí uspať.
+  final bool usporaBaterieVypnuta;
 }
 
 class UdalostRozpoznavaniaAktivity {

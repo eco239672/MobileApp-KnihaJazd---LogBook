@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// Záznam toho, čo sa dialo na pozadí: rozpoznanie jazdy, spustenie GPS,
 /// odmietnutia systémom, uložené jazdy. Slúži na hľadanie príčin, prečo sa
@@ -55,6 +56,14 @@ class _DiagnostikaPageState extends State<DiagnostikaPage> {
     );
   }
 
+  Future<void> _zdielat() async {
+    final text = _zaznam ?? '';
+    if (text.isEmpty) return;
+    await SharePlus.instance.share(
+      ShareParams(text: text, subject: 'Kniha jázd – diagnostika'),
+    );
+  }
+
   Future<void> _vymazat() async {
     final potvrdene = await showDialog<bool>(
       context: context,
@@ -90,6 +99,11 @@ class _DiagnostikaPageState extends State<DiagnostikaPage> {
             tooltip: 'Obnoviť',
             onPressed: _nacitat,
             icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
+            tooltip: 'Zdieľať (e-mail, WhatsApp…)',
+            onPressed: text.isEmpty ? null : _zdielat,
+            icon: const Icon(Icons.share_outlined),
           ),
           IconButton(
             tooltip: 'Kopírovať',
