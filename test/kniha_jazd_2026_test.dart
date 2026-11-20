@@ -5,7 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kniha_jazd/models/jazda.dart';
 import 'package:kniha_jazd/models/nastavenia_vozidla.dart';
 import 'package:kniha_jazd/services/doplnenie_adries.dart';
+import 'package:kniha_jazd/models/trasa_bod.dart';
 import 'package:kniha_jazd/services/excel_export_service.dart';
+import 'package:kniha_jazd/services/gps_tracking_service.dart';
+import 'package:kniha_jazd/services/jazda_z_gps.dart';
 import 'package:kniha_jazd/services/kniha_jazd_vypocty.dart';
 import 'package:kniha_jazd/services/lokalne_ulozisko.dart';
 import 'package:path/path.dart' as path;
@@ -99,6 +102,51 @@ void main() {
       ], const []);
       expect(zmenene, isEmpty);
       expect(dopytov, 1);
+    });
+  });
+
+  group('jazda z GPS', () {
+    DokoncenaGpsJazda gps({bool? autoBluetooth}) => DokoncenaGpsJazda(
+      zaciatok: TrasaBod(
+        latitude: 48.151,
+        longitude: 17.8765,
+        cas: DateTime(2026, 11, 20, 7, 5),
+        presnostMetre: 8,
+        rychlostMetreZaSekundu: 0,
+      ),
+      koniec: TrasaBod(
+        latitude: 48.31257,
+        longitude: 18.09061,
+        cas: DateTime(2026, 11, 20, 7, 41),
+        presnostMetre: 8,
+        rychlostMetreZaSekundu: 0,
+      ),
+      prejdeneMetre: 31540,
+      autoBluetooth: autoBluetooth,
+    );
+
+    test('súradnice, časy, kilometre a stabilné ID', () {
+      final jazda = jazdaZGps(gps(), identifikator: 'abc');
+      expect(jazda.odkial, _domov);
+      expect(jazda.odkialSuradnice, _domov);
+      expect(jazda.kam, _praca);
+      expect(jazda.zaciatok, '07:05');
+      expect(jazda.koniec, '07:41');
+      expect(jazda.kilometre, closeTo(31.54, 1e-9));
+      expect(jazda.typ, TypJazdy.sluzobna);
+      expect(jazda.cloudId, 'gps-abc');
+    });
+
+    test('obľúbené miesto a jazda bez Bluetooth auta', () {
+      final jazda = jazdaZGps(
+        gps(autoBluetooth: false),
+        oblubeneMiesta: const [
+          OblubeneMiesto(nazov: 'Domov', latitude: 48.151, longitude: 17.8765),
+        ],
+      );
+      expect(jazda.odkial, 'Domov');
+      expect(jazda.typ, TypJazdy.sukromna);
+      expect(jazda.autoBluetooth, isFalse);
     });
   });
 

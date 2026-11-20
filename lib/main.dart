@@ -13,15 +13,15 @@ import 'features/nastavenia/nastavenia_vozidla_page.dart';
 import 'features/prehlad/prehlad_page.dart';
 import 'models/jazda.dart';
 import 'models/nastavenia_vozidla.dart';
-import 'models/synchronizacia.dart';
-import 'models/trasa_bod.dart';
 import 'services/gps_tracking_service.dart';
 import 'services/gps_pozadie_service.dart';
 import 'services/cloudova_synchronizacia.dart';
 import 'services/doplnenie_adries.dart';
 import 'services/excel_export_service.dart';
+import 'services/jazda_z_gps.dart';
 import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
+import 'services/synchronizacia_jazd.dart';
 import 'utils/format_datumu.dart';
 
 /// Firebase je inicializovaný len v skutočnej aplikácii (nie vo widget testoch).
@@ -96,16 +96,19 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
   var _nacitavaUdaje = true;
   var _exportujeExcel = false;
 
-  // Prenos jázd z natívnej služby a synchronizácia s cloudom môžu byť vyvolané
-  // viackrát naraz (štart aplikácie, udalosť „jazda dokončená“, tlačidlo).
-  // Reťazením ich spúšťame po jednom, inak by sa tá istá jazda uložila dvakrát.
+  // Prenos jázd z natívnej služby môže byť vyvolaný viackrát naraz (štart
+  // aplikácie, udalosť „jazda dokončená“). Reťazením beží po jednom, inak by
+  // sa tá istá jazda uložila dvakrát.
   Future<void> _poslednyPrenos = Future.value();
-  Future<void> _poslednaSynchronizacia = Future.value();
   Timer? _casovacSynchronizacie;
   CloudovyUcet? _ucet;
 
   CloudovaSynchronizacia get _cloud =>
       _cloudovaSynchronizacia ??= CloudovaSynchronizacia();
+  late final _synchronizacia = SynchronizaciaJazd(
+    ulozisko: _ulozisko,
+    cloud: _cloud,
+  );
 
   @override
   void initState() {
@@ -389,33 +392,10 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     bool zobrazitSpravu = true,
     String? identifikator,
   }) async {
-    String miesto(TrasaBod bod) =>
-        formatovatSuradnice(bod.latitude, bod.longitude);
-    String cas(DateTime datum) =>
-        '${datum.hour.toString().padLeft(2, '0')}:${datum.minute.toString().padLeft(2, '0')}';
-    final odkial = miesto(jazda.zaciatok);
-    final kam = miesto(jazda.koniec);
-    // Ak je nastavené Bluetooth auta a telefón k nemu počas jazdy nebol
-    // pripojený, išlo pravdepodobne o iné vozidlo (autobus, cudzie auto).
-    final ineVozidlo = jazda.autoBluetooth == false;
-    // Súradnice zostanú ako dôkaz; adresa sa doplní, keď bude internet.
-    final ukladanaJazda = DoplnenieAdries.pouzitOblubeneMiesta(
-      Jazda(
-        datum: jazda.zaciatok.cas,
-        odkial: odkial,
-        kam: kam,
-        odkialSuradnice: odkial,
-        kamSuradnice: kam,
-        zaciatok: cas(jazda.zaciatok.cas),
-        koniec: cas(jazda.koniec.cas),
-        kilometre: jazda.prejdeneMetre / 1000,
-        typ: ineVozidlo ? TypJazdy.sukromna : TypJazdy.sluzobna,
-        autoBluetooth: jazda.autoBluetooth,
-        // Rovnaký záznam z GPS na pozadí má vždy rovnaké ID, takže sa nemôže
-        // uložiť dvakrát ani pri opakovanom prenose.
-        cloudId: identifikator == null ? null : 'gps-$identifikator',
-      ),
-      _nastaveniaVozidla.oblubeneMiesta,
+    final ukladanaJazda = jazdaZGps(
+      jazda,
+      identifikator: identifikator,
+      oblubeneMiesta: _nastaveniaVozidla.oblubeneMiesta,
     );
     try {
       final ulozenaJazda = await _ulozisko.ulozitJazdu(ukladanaJazda);
@@ -427,7 +407,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
       return false;
     }
     if (zobrazitSpravu) {
-      _zobrazitSpravu('Služobná jazda bola automaticky zaznamenaná.');
+      _zobrazitSpravu('Jazda bola automaticky zaznamenaná.');
     }
     return true;
   }
@@ -565,45 +545,8 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     }
   }
 
-  Future<void> _synchronizovatDoCloudu({bool zobrazitVysledok = false}) {
-    final dalsia = _poslednaSynchronizacia.then(
-      (_) => _synchronizovatDoCloudTeraz(zobrazitVysledok: zobrazitVysledok),
-    );
-    // Chyba jednej synchronizácie nesmie zablokovať ďalšie v poradí.
-    _poslednaSynchronizacia = dalsia.catchError((Object _) {});
-    return dalsia;
-  }
-
-  /// Najprv stiahne zmeny z cloudu (novšia úprava vyhráva), potom odošle
-  /// to, čo sa zmenilo v telefóne. Do cloudu ide len to, čo sa zmenilo.
-  Future<void> _synchronizovatDoCloudTeraz({
-    bool zobrazitVysledok = false,
-  }) async {
-    final stiahnute = await _cloud.stiahnutJazdy(
-      odMillis: await _ulozisko.nacitatCasStiahnutia(),
-    );
-    var zmenene = await _ulozisko.aplikovatJazdyZCloudu(stiahnute.jazdy);
-    final najnovsi = stiahnute.najnovsiCasMillis;
-    if (najnovsi != null) await _ulozisko.ulozitCasStiahnutia(najnovsi);
-
-    final vzdialeneNastavenia = await _cloud.stiahnutNastavenia();
-    if (vzdialeneNastavenia != null &&
-        await _ulozisko.aplikovatNastaveniaZCloudu(vzdialeneNastavenia)) {
-      zmenene = true;
-    }
-
-    final neodoslaneJazdy = await _ulozisko.nacitatNeodoslaneJazdy();
-    if (neodoslaneJazdy.isNotEmpty) {
-      await _cloud.odoslatJazdy(neodoslaneJazdy);
-      await _ulozisko.oznacitOdoslane(neodoslaneJazdy);
-    }
-    final ZmenaNastaveni? neodoslaneNastavenia = await _ulozisko
-        .nacitatNeodoslaneNastavenia();
-    if (neodoslaneNastavenia != null) {
-      await _cloud.odoslatNastavenia(neodoslaneNastavenia);
-      await _ulozisko.oznacitNastaveniaOdoslane(neodoslaneNastavenia.upravene);
-    }
-
+  Future<void> _synchronizovatDoCloudu({bool zobrazitVysledok = false}) async {
+    final zmenene = await _synchronizacia.synchronizovat();
     if (zmenene) {
       final udaje = await _ulozisko.nacitat();
       if (!mounted) return;
