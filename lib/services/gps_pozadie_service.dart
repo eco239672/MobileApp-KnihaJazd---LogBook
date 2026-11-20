@@ -41,6 +41,54 @@ class GpsPozadieService {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     await _kanal.invokeMethod<void>('otvoritNastaveniaPolohy');
   }
+
+  /// Adresa k súradniciam cez Geocoder telefónu (zadarmo, potrebuje internet).
+  /// null = teraz sa nedá zistiť; prázdny text = pre miesto adresa neexistuje.
+  Future<String?> zistitAdresu(double latitude, double longitude) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      return await _kanal.invokeMethod<String>('adresa', {
+        'latitude': latitude,
+        'longitude': longitude,
+      });
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Spárované Bluetooth zariadenia (na výber auta). Na Androide 12+ si
+  /// najprv vypýta povolenie „Zariadenia v okolí“.
+  Future<List<BluetoothZariadenie>> sparovaneBluetooth() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return [];
+    final odpoved = await _kanal.invokeListMethod<dynamic>(
+      'sparovaneBluetooth',
+    );
+    return [
+      for (final polozka in odpoved ?? const [])
+        if (polozka is Map &&
+            polozka['adresa'] is String &&
+            polozka['nazov'] is String)
+          BluetoothZariadenie(
+            adresa: polozka['adresa'] as String,
+            nazov: polozka['nazov'] as String,
+          ),
+    ];
+  }
+
+  /// Povie natívnej časti, ktoré Bluetooth zariadenie je auto (null = žiadne).
+  Future<void> nastavitBluetoothAuta(String? adresa) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    await _kanal.invokeMethod<void>('nastavitBluetoothAuta', adresa);
+  }
+}
+
+class BluetoothZariadenie {
+  const BluetoothZariadenie({required this.adresa, required this.nazov});
+
+  final String adresa;
+  final String nazov;
 }
 
 class DokoncenaGpsJazdaNaPrenos {
@@ -68,6 +116,7 @@ class DokoncenaGpsJazdaNaPrenos {
         zaciatok: bod('zaciatok'),
         koniec: bod('koniec'),
         prejdeneMetre: cislo('prejdeneMetre').toDouble(),
+        autoBluetooth: mapa['autoBluetooth'] as bool?,
       ),
     );
   }

@@ -206,10 +206,14 @@ class DokoncenaGpsJazda {
     required this.zaciatok,
     required this.koniec,
     required this.prejdeneMetre,
+    this.autoBluetooth,
   });
   final TrasaBod zaciatok;
   final TrasaBod koniec;
   final double prejdeneMetre;
+
+  /// Bol telefón počas jazdy pripojený k Bluetooth auta? null = nesleduje sa.
+  final bool? autoBluetooth;
 }
 
 class GpsTrackingException implements Exception {

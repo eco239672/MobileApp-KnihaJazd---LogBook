@@ -1,13 +1,18 @@
 package sk.knihajazd.kniha_jazd
 
 import android.Manifest
+import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.Address
+import android.location.Geocoder
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -16,12 +21,15 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity"
     private val eventChannelName = "sk.knihajazd.kniha_jazd/rozpoznavanie_aktivity_udalosti"
     private val requestPovolenia = 481
     private val requestNotifikacie = 482
+    private val requestBluetooth = 483
+    private var cakajuciVysledokBluetooth: MethodChannel.Result? = null
 
     private var eventSink: EventChannel.EventSink? = null
     private var cakajuciVysledokPovolenia: MethodChannel.Result? = null
@@ -74,6 +82,20 @@ class MainActivity : FlutterActivity() {
                     }
                     "zapisatDiagnostiku" -> {
                         call.arguments<String>()?.let { Diagnostika.zapisat(this, it) }
+                        result.success(null)
+                    }
+                    "adresa" -> {
+                        val latitude = call.argument<Double>("latitude")
+                        val longitude = call.argument<Double>("longitude")
+                        if (latitude == null || longitude == null) {
+                            result.success(null)
+                        } else {
+                            zistitAdresu(latitude, longitude, result)
+                        }
+                    }
+                    "sparovaneBluetooth" -> sparovaneBluetooth(result)
+                    "nastavitBluetoothAuta" -> {
+                        BluetoothAuta.nastavit(this, call.arguments<String>())
                         result.success(null)
                     }
                     else -> result.notImplemented()
@@ -138,7 +160,11 @@ class MainActivity : FlutterActivity() {
                         "koniecPresnost" to jazda.getDouble("koniecPresnost"),
                         "koniecRychlost" to jazda.getDouble("koniecRychlost"),
                         "prejdeneMetre" to jazda.getDouble("prejdeneMetre"),
-                    )
+                    ) + if (jazda.has("autoBluetooth")) {
+                        mapOf("autoBluetooth" to jazda.getBoolean("autoBluetooth"))
+                    } else {
+                        emptyMap()
+                    }
                 }.getOrNull() ?: continue
                 add(zaznam)
             }
@@ -175,6 +201,98 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun maPovolenie(): Boolean = RegistraciaRozpoznavania.maPovolenieAktivity(this)
+
+    /**
+     * Adresa k súradniciam cez Geocoder telefónu (zadarmo, potrebuje internet).
+     * Vráti null pri chybe (napr. bez internetu) a prázdny text, ak pre
+     * miesto žiadna adresa neexistuje.
+     */
+    private fun zistitAdresu(latitude: Double, longitude: Double, result: MethodChannel.Result) {
+        if (!Geocoder.isPresent()) {
+            result.success(null)
+            return
+        }
+        val hlavneVlakno = Handler(Looper.getMainLooper())
+        var odoslane = false
+        fun odoslat(hodnota: String?) {
+            hlavneVlakno.post {
+                if (odoslane) return@post
+                odoslane = true
+                result.success(hodnota)
+            }
+        }
+        val geocoder = Geocoder(this, Locale.forLanguageTag("sk-SK"))
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                geocoder.getFromLocation(
+                    latitude,
+                    longitude,
+                    1,
+                    object : Geocoder.GeocodeListener {
+                        override fun onGeocode(adresy: MutableList<Address>) {
+                            odoslat(adresy.firstOrNull()?.let { formatovatAdresu(it) } ?: "")
+                        }
+
+                        override fun onError(sprava: String?) {
+                            odoslat(null)
+                        }
+                    },
+                )
+            } else {
+                Thread {
+                    try {
+                        @Suppress("DEPRECATION")
+                        val adresy = geocoder.getFromLocation(latitude, longitude, 1)
+                        odoslat(adresy?.firstOrNull()?.let { formatovatAdresu(it) } ?: "")
+                    } catch (_: Exception) {
+                        odoslat(null)
+                    }
+                }.start()
+            }
+        } catch (_: Exception) {
+            odoslat(null)
+        }
+    }
+
+    /** „Hlavná 12, Šaľa“; bez ulice len obec. */
+    private fun formatovatAdresu(adresa: Address): String {
+        val ulica = listOfNotNull(adresa.thoroughfare, adresa.subThoroughfare)
+            .joinToString(" ")
+            .trim()
+        val obec = adresa.locality ?: adresa.subLocality ?: adresa.subAdminArea
+        val casti = listOfNotNull(ulica.ifBlank { null }, obec).distinct()
+        if (casti.isNotEmpty()) return casti.joinToString(", ")
+        return adresa.getAddressLine(0) ?: ""
+    }
+
+    /** Spárované Bluetooth zariadenia (Android 12+ najprv vypýta povolenie). */
+    private fun sparovaneBluetooth(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            cakajuciVysledokBluetooth?.error("ZRUSENE", "Nová žiadosť o povolenie", null)
+            cakajuciVysledokBluetooth = result
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), requestBluetooth)
+            return
+        }
+        result.success(zoznamSparovanych())
+    }
+
+    private fun zoznamSparovanych(): List<Map<String, String>> {
+        val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return emptyList()
+        return try {
+            adapter.bondedDevices.orEmpty()
+                .map { zariadenie ->
+                    mapOf(
+                        "adresa" to zariadenie.address,
+                        "nazov" to (zariadenie.name ?: zariadenie.address),
+                    )
+                }
+                .sortedBy { it["nazov"]?.lowercase() }
+        } catch (_: SecurityException) {
+            emptyList()
+        }
+    }
 
     /**
      * Jedným systémovým dialógom vypýta všetko, čo automatické sledovanie
@@ -266,6 +384,16 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == requestBluetooth) {
+            val vysledok = cakajuciVysledokBluetooth ?: return
+            cakajuciVysledokBluetooth = null
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                vysledok.success(zoznamSparovanych())
+            } else {
+                vysledok.error("BLUETOOTH_ZAMIETNUTE", "Povolenie Zariadenia v okolí nebolo udelené.", null)
+            }
+            return
+        }
         if (requestCode == requestNotifikacie) {
             val vysledok = cakajuciVysledokNotifikacii ?: return
             cakajuciVysledokNotifikacii = null

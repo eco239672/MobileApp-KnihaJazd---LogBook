@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/jazda.dart';
+import '../../models/nastavenia_vozidla.dart';
 import '../../utils/decimalny_vstup.dart';
 import 'widgets/jazda_polozka.dart';
 
@@ -12,6 +13,8 @@ class DetailDnaPage extends StatefulWidget {
     this.den,
     this.onJazdaPridana,
     this.onJazdaVymazana,
+    this.onPridatOblubeneMiesto,
+    this.predvolenyVodic = '',
     super.key,
   });
 
@@ -23,6 +26,13 @@ class DetailDnaPage extends StatefulWidget {
   final DateTime? den;
   final Future<Jazda> Function(Jazda)? onJazdaPridana;
   final Future<void> Function(Jazda)? onJazdaVymazana;
+
+  /// Uloží miesto začiatku alebo konca jazdy ako obľúbené (napr. „Domov“).
+  /// Vráti jazdy, ktoré sa pritom premenovali.
+  final Future<List<Jazda>> Function(OblubeneMiesto)? onPridatOblubeneMiesto;
+
+  /// Vodič z nastavení vozidla; zobrazí sa ako nápoveda pri jazde bez vodiča.
+  final String predvolenyVodic;
 
   @override
   State<DetailDnaPage> createState() => _DetailDnaPageState();
@@ -50,6 +60,10 @@ class _DetailDnaPageState extends State<DetailDnaPage> {
       builder: (context) => _EditorJazdyDialog(
         jazda: _jazdy[index].jazda,
         mozeVymazat: widget.onJazdaVymazana != null,
+        predvolenyVodic: widget.predvolenyVodic,
+        onPridatOblubeneMiesto: widget.onPridatOblubeneMiesto == null
+            ? null
+            : _pridatOblubeneMiesto,
       ),
     );
     if (vysledok == null || !mounted) return;
@@ -72,6 +86,20 @@ class _DetailDnaPageState extends State<DetailDnaPage> {
         );
       }
     }
+  }
+
+  /// Pridá obľúbené miesto a premenované jazdy hneď ukáže aj v tomto dni.
+  Future<void> _pridatOblubeneMiesto(OblubeneMiesto miesto) async {
+    final pridat = widget.onPridatOblubeneMiesto;
+    if (pridat == null) return;
+    final premenovane = await pridat(miesto);
+    if (!mounted || premenovane.isEmpty) return;
+    setState(() {
+      for (final jazda in premenovane) {
+        final index = _jazdy.indexWhere((zaznam) => zaznam.jazda.id == jazda.id);
+        if (index >= 0) _jazdy[index] = _jazdy[index].copyWith(jazda: jazda);
+      }
+    });
   }
 
   Future<void> _vymazatJazdu(int index) async {
@@ -121,6 +149,7 @@ class _DetailDnaPageState extends State<DetailDnaPage> {
           typ: TypJazdy.sluzobna,
         ),
         nova: true,
+        predvolenyVodic: widget.predvolenyVodic,
       ),
     );
     final novaJazda = vysledok?.jazda;
@@ -226,11 +255,15 @@ class _EditorJazdyDialog extends StatefulWidget {
     required this.jazda,
     this.nova = false,
     this.mozeVymazat = false,
+    this.predvolenyVodic = '',
+    this.onPridatOblubeneMiesto,
   });
 
   final Jazda jazda;
   final bool nova;
   final bool mozeVymazat;
+  final String predvolenyVodic;
+  final Future<void> Function(OblubeneMiesto)? onPridatOblubeneMiesto;
 
   @override
   State<_EditorJazdyDialog> createState() => _EditorJazdyDialogState();
@@ -243,6 +276,9 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
   late final TextEditingController _zaciatok;
   late final TextEditingController _koniec;
   late final TextEditingController _kilometre;
+  late final TextEditingController _ucel;
+  late final TextEditingController _vodic;
+  late final TextEditingController _tachometerPo;
   late TypJazdy _typ;
 
   @override
@@ -255,6 +291,11 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
     _kilometre = TextEditingController(
       text: widget.nova ? '' : widget.jazda.kilometre.toStringAsFixed(1),
     );
+    _ucel = TextEditingController(text: widget.jazda.ucel);
+    _vodic = TextEditingController(text: widget.jazda.vodic);
+    _tachometerPo = TextEditingController(
+      text: widget.jazda.tachometerPo?.toStringAsFixed(1) ?? '',
+    );
     _typ = widget.jazda.typ;
   }
 
@@ -265,6 +306,9 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
     _zaciatok.dispose();
     _koniec.dispose();
     _kilometre.dispose();
+    _ucel.dispose();
+    _vodic.dispose();
+    _tachometerPo.dispose();
     super.dispose();
   }
 
@@ -280,9 +324,55 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
           koniec: _normalizovatCas(_koniec.text),
           kilometre: double.parse(_kilometre.text.replaceAll(',', '.')),
           typ: _typ,
+          ucel: _ucel.text.trim(),
+          vodic: _vodic.text.trim(),
+          tachometerPo: _volitelneCislo(_tachometerPo.text),
         ),
       ),
     );
+  }
+
+  double? _volitelneCislo(String hodnota) {
+    final text = hodnota.trim().replaceAll(',', '.');
+    return text.isEmpty ? null : double.tryParse(text);
+  }
+
+  String? _tachometerValidator(String? hodnota) {
+    final text = (hodnota ?? '').trim();
+    if (text.isEmpty) return null;
+    final cislo = double.tryParse(text.replaceAll(',', '.'));
+    return cislo == null || !cislo.isFinite || cislo < 0
+        ? 'Zadaj stav tachometra v km alebo pole nechaj prázdne.'
+        : null;
+  }
+
+  /// Uloží začiatok alebo koniec jazdy ako obľúbené miesto (napr. „Domov“).
+  Future<void> _ulozitAkoOblubene(String suradnice, String navrh) async {
+    final pridat = widget.onPridatOblubeneMiesto;
+    final bod = precitatSuradnice(suradnice);
+    if (pridat == null || bod == null) return;
+    final nazov = await showDialog<String>(
+      context: context,
+      builder: (context) => _NazovMiestaDialog(navrh: navrh),
+    );
+    if (nazov == null || nazov.trim().isEmpty || !mounted) return;
+    final navigator = Navigator.of(context);
+    try {
+      await pridat(
+        OblubeneMiesto(
+          nazov: nazov.trim(),
+          latitude: bod.latitude,
+          longitude: bod.longitude,
+        ),
+      );
+      // Editor zavrieme bez uloženia; jazda sa premenuje podľa voľby.
+      if (mounted) navigator.pop();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Obľúbené miesto sa nepodarilo uložiť.')),
+      );
+    }
   }
 
   /// „8:05“ → „08:05“, aby sa časy dali spoľahlivo zoraďovať a exportovať.
@@ -309,6 +399,32 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
     return kilometre == null || !kilometre.isFinite || kilometre < 0
         ? 'Zadaj platný počet kilometrov.'
         : null;
+  }
+
+  /// GPS súradnice miesta (dôkaz) a tlačidlo na uloženie obľúbeného miesta.
+  List<Widget> _suradnice(String popis, String? suradnice, String miesto) {
+    if (suradnice == null) return const [];
+    final mozePridat = widget.onPridatOblubeneMiesto != null && !widget.nova;
+    final navrh = miesto == suradnice ? '' : miesto;
+    return [
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$popis podľa GPS: $suradnice',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          if (mozePridat)
+            IconButton(
+              tooltip: 'Uložiť ako obľúbené miesto',
+              onPressed: () => _ulozitAkoOblubene(suradnice, navrh),
+              icon: const Icon(Icons.star_outline),
+            ),
+        ],
+      ),
+    ];
   }
 
   @override
@@ -363,6 +479,43 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
               decoration: const InputDecoration(labelText: 'Kilometre'),
               validator: _kilometreValidator,
             ),
+            TextFormField(
+              controller: _ucel,
+              textCapitalization: TextCapitalization.sentences,
+              maxLines: null,
+              decoration: InputDecoration(
+                labelText: 'Účel jazdy',
+                hintText: 'napr. Stretnutie so zákazníkom XY',
+                helperText: _typ == TypJazdy.sluzobna
+                    ? 'Pre daňové účely konkrétne, nie len „služobná cesta“.'
+                    : null,
+                helperMaxLines: 2,
+              ),
+            ),
+            TextFormField(
+              controller: _vodic,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: 'Vodič',
+                hintText: widget.predvolenyVodic.trim().isEmpty
+                    ? 'Meno a priezvisko'
+                    : widget.predvolenyVodic.trim(),
+              ),
+            ),
+            TextFormField(
+              controller: _tachometerPo,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [decimalnyVstup],
+              decoration: const InputDecoration(
+                labelText: 'Stav tachometra po jazde (nepovinné)',
+                suffixText: 'km',
+                helperText: 'Vyplň, keď chceš zladiť knihu jázd s tachometrom.',
+                helperMaxLines: 2,
+              ),
+              validator: _tachometerValidator,
+            ),
             const SizedBox(height: 12),
             DropdownButtonFormField<TypJazdy>(
               initialValue: _typ,
@@ -377,6 +530,19 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
                 if (typ != null) setState(() => _typ = typ);
               },
             ),
+            if (widget.jazda.autoBluetooth == false) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Počas jazdy nebol telefón pripojený k Bluetooth auta, preto je jazda označená ako súkromná.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            ..._suradnice(
+              'Začiatok',
+              widget.jazda.odkialSuradnice,
+              widget.jazda.odkial,
+            ),
+            ..._suradnice('Koniec', widget.jazda.kamSuradnice, widget.jazda.kam),
           ],
         ),
       ),
@@ -395,6 +561,55 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
           child: const Text('Zrušiť'),
         ),
         FilledButton(onPressed: _ulozit, child: const Text('Uložiť')),
+      ],
+    );
+  }
+}
+
+/// Dialóg na pomenovanie obľúbeného miesta (Domov, Práca…).
+class _NazovMiestaDialog extends StatefulWidget {
+  const _NazovMiestaDialog({required this.navrh});
+
+  final String navrh;
+
+  @override
+  State<_NazovMiestaDialog> createState() => _NazovMiestaDialogState();
+}
+
+class _NazovMiestaDialogState extends State<_NazovMiestaDialog> {
+  late final TextEditingController _nazov = TextEditingController(
+    text: widget.navrh,
+  );
+
+  @override
+  void dispose() {
+    _nazov.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Obľúbené miesto'),
+      content: TextField(
+        controller: _nazov,
+        autofocus: true,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          labelText: 'Názov',
+          hintText: 'napr. Domov, Práca, Sklad',
+        ),
+        onSubmitted: (hodnota) => Navigator.of(context).pop(hodnota),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Zrušiť'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_nazov.text),
+          child: const Text('Uložiť'),
+        ),
       ],
     );
   }

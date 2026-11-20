@@ -20,6 +20,30 @@ while cloud backup remains optional.
   and Firestore Security Rules);
 - an empty trip log ready for real journeys.
 - Excel export with a yearly overview and one worksheet for every recorded month.
+- electronic trip log data (Slovak rules from 1 January 2026): vehicle VIN,
+  registration number, name and type, category, default driver and odometer at
+  the start of record keeping; per trip a yearly sequence number, driver,
+  purpose, and odometer before and after (computed from the starting odometer;
+  a real odometer reading entered for a trip resets the running total);
+- addresses instead of GPS coordinates: the phone's free Android Geocoder fills
+  them in when internet is available (coordinates stay in the trip as proof);
+  favourite places (Home, Work…) within 150 m replace the address with a name;
+- optional car recognition via Bluetooth: if the car's Bluetooth device is
+  selected, a GPS trip without a connection to it is saved as private.
+
+## Trip-logic simulation (no phone needed)
+
+`android/app/src/test/.../ZaznamJazdyTest.kt` drives the pure-Kotlin trip logic
+(`ZaznamJazdy`) through fixed scenarios and 500 random trips between real
+Slovak municipalities (`android/app/src/test/resources/obce_sk.csv`, data from
+OpenStreetMap): waiting before departure, traffic lights, jams, tunnels,
+inaccurate GPS points, false “left the vehicle” events and Android stopping the
+tracking service mid-trip. The log is written to `build/simulacia-jazdy.txt`.
+
+```powershell
+cd android
+.\gradlew.bat :app:testDebugUnitTest
+```
 
 ## Verification
 

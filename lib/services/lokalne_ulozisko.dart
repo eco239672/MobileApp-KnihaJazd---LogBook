@@ -61,7 +61,7 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
         databazovaCesta ?? path.join(await getDatabasesPath(), _nazovDatabazy);
     final databaza = await openDatabase(
       ciel,
-      version: 5,
+      version: 6,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE jazdy(
@@ -76,7 +76,13 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
             typ TEXT NOT NULL,
             upravene INTEGER NOT NULL DEFAULT 0,
             odoslane INTEGER NOT NULL DEFAULT 0,
-            vymazane INTEGER NOT NULL DEFAULT 0
+            vymazane INTEGER NOT NULL DEFAULT 0,
+            ucel TEXT NOT NULL DEFAULT '',
+            vodic TEXT NOT NULL DEFAULT '',
+            odkial_suradnice TEXT,
+            kam_suradnice TEXT,
+            tachometer_po REAL,
+            auto_bluetooth INTEGER
           )
         ''');
         await _vytvoritUnikatnyCloudId(db);
@@ -89,7 +95,15 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
             cena_benzinu REAL,
             cena_nafty REAL,
             upravene INTEGER NOT NULL DEFAULT 0,
-            odoslane INTEGER NOT NULL DEFAULT 0
+            odoslane INTEGER NOT NULL DEFAULT 0,
+            vin TEXT NOT NULL DEFAULT '',
+            znacka_typ TEXT NOT NULL DEFAULT '',
+            kategoria TEXT NOT NULL DEFAULT 'M1',
+            vodic TEXT NOT NULL DEFAULT '',
+            pociatocny_tachometer REAL,
+            oblubene_miesta TEXT NOT NULL DEFAULT '[]',
+            bluetooth_auta TEXT,
+            bluetooth_auta_nazov TEXT
           )
         ''');
       },
@@ -151,6 +165,43 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
             'ALTER TABLE nastavenia_vozidla ADD COLUMN odoslane INTEGER NOT NULL DEFAULT 0',
           );
           await _vytvoritMeta(db);
+        }
+        if (staraVerzia < 6) {
+          // Údaje elektronickej knihy jázd (účel, vodič, tachometer, vozidlo)
+          // a adresy namiesto súradníc.
+          for (final stlpec in [
+            "ucel TEXT NOT NULL DEFAULT ''",
+            "vodic TEXT NOT NULL DEFAULT ''",
+            'odkial_suradnice TEXT',
+            'kam_suradnice TEXT',
+            'tachometer_po REAL',
+            'auto_bluetooth INTEGER',
+          ]) {
+            await db.execute('ALTER TABLE jazdy ADD COLUMN $stlpec');
+          }
+          for (final stlpec in [
+            "vin TEXT NOT NULL DEFAULT ''",
+            "znacka_typ TEXT NOT NULL DEFAULT ''",
+            "kategoria TEXT NOT NULL DEFAULT 'M1'",
+            "vodic TEXT NOT NULL DEFAULT ''",
+            'pociatocny_tachometer REAL',
+            "oblubene_miesta TEXT NOT NULL DEFAULT '[]'",
+            'bluetooth_auta TEXT',
+            'bluetooth_auta_nazov TEXT',
+          ]) {
+            await db.execute('ALTER TABLE nastavenia_vozidla ADD COLUMN $stlpec');
+          }
+          // Staršie jazdy z GPS majú v „odkiaľ/kam“ súradnice: zapamätáme si
+          // ich ako dôkaz miesta a adresa sa k nim doplní automaticky.
+          for (final (miesto, suradnice) in [
+            ('odkial', 'odkial_suradnice'),
+            ('kam', 'kam_suradnice'),
+          ]) {
+            await db.execute('''
+              UPDATE jazdy SET $suradnice = $miesto
+              WHERE $miesto GLOB '[0-9]*.[0-9]*, [0-9]*.[0-9]*'
+            ''');
+          }
         }
       },
     );
@@ -240,11 +291,7 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
   Future<void> ulozitNastavenia(NastaveniaVozidla nastavenia) async {
     final db = await _db;
     await db.insert('nastavenia_vozidla', {
-      'id': 1,
-      'spz': nastavenia.spz,
-      'priemerna_spotreba': nastavenia.priemernaSpotreba,
-      'cena_benzinu': nastavenia.cenaBenzinu,
-      'cena_nafty': nastavenia.cenaNafty,
+      ..._nastaveniaDoMapy(nastavenia),
       'upravene': _teraz(),
       'odoslane': 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -383,13 +430,8 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
         (miestne.single['upravene']! as int) >= zmena.upravene) {
       return false;
     }
-    final nastavenia = zmena.nastavenia;
     await db.insert('nastavenia_vozidla', {
-      'id': 1,
-      'spz': nastavenia.spz,
-      'priemerna_spotreba': nastavenia.priemernaSpotreba,
-      'cena_benzinu': nastavenia.cenaBenzinu,
-      'cena_nafty': nastavenia.cenaNafty,
+      ..._nastaveniaDoMapy(zmena.nastavenia),
       'upravene': zmena.upravene,
       'odoslane': 1,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -432,6 +474,16 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
     'koniec': jazda.koniec,
     'kilometre': jazda.kilometre,
     'typ': jazda.typ.name,
+    'ucel': jazda.ucel,
+    'vodic': jazda.vodic,
+    'odkial_suradnice': jazda.odkialSuradnice,
+    'kam_suradnice': jazda.kamSuradnice,
+    'tachometer_po': jazda.tachometerPo,
+    'auto_bluetooth': switch (jazda.autoBluetooth) {
+      null => null,
+      true => 1,
+      false => 0,
+    },
   };
 
   Jazda _jazdaZMapy(Map<String, Object?> mapa) => Jazda(
@@ -444,7 +496,33 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
     koniec: mapa['koniec']! as String,
     kilometre: (mapa['kilometre']! as num).toDouble(),
     typ: TypJazdy.values.byName(mapa['typ']! as String),
+    ucel: mapa['ucel'] as String? ?? '',
+    vodic: mapa['vodic'] as String? ?? '',
+    odkialSuradnice: mapa['odkial_suradnice'] as String?,
+    kamSuradnice: mapa['kam_suradnice'] as String?,
+    tachometerPo: (mapa['tachometer_po'] as num?)?.toDouble(),
+    autoBluetooth: switch (mapa['auto_bluetooth']) {
+      1 => true,
+      0 => false,
+      _ => null,
+    },
   );
+
+  Map<String, Object?> _nastaveniaDoMapy(NastaveniaVozidla nastavenia) => {
+    'id': 1,
+    'spz': nastavenia.spz,
+    'priemerna_spotreba': nastavenia.priemernaSpotreba,
+    'cena_benzinu': nastavenia.cenaBenzinu,
+    'cena_nafty': nastavenia.cenaNafty,
+    'vin': nastavenia.vin,
+    'znacka_typ': nastavenia.znackaTyp,
+    'kategoria': nastavenia.kategoria,
+    'vodic': nastavenia.vodic,
+    'pociatocny_tachometer': nastavenia.pociatocnyTachometer,
+    'oblubene_miesta': OblubeneMiesto.naJson(nastavenia.oblubeneMiesta),
+    'bluetooth_auta': nastavenia.bluetoothAuta,
+    'bluetooth_auta_nazov': nastavenia.bluetoothAutaNazov,
+  };
 
   NastaveniaVozidla _nastaveniaZMapy(Map<String, Object?> mapa) =>
       NastaveniaVozidla(
@@ -452,6 +530,17 @@ class SqliteLokalneUlozisko implements LokalneUlozisko {
         priemernaSpotreba: (mapa['priemerna_spotreba'] as num?)?.toDouble(),
         cenaBenzinu: (mapa['cena_benzinu'] as num?)?.toDouble(),
         cenaNafty: (mapa['cena_nafty'] as num?)?.toDouble(),
+        vin: mapa['vin'] as String? ?? '',
+        znackaTyp: mapa['znacka_typ'] as String? ?? '',
+        kategoria: mapa['kategoria'] as String? ?? 'M1',
+        vodic: mapa['vodic'] as String? ?? '',
+        pociatocnyTachometer: (mapa['pociatocny_tachometer'] as num?)
+            ?.toDouble(),
+        oblubeneMiesta: OblubeneMiesto.zJson(
+          mapa['oblubene_miesta'] as String?,
+        ),
+        bluetoothAuta: mapa['bluetooth_auta'] as String?,
+        bluetoothAutaNazov: mapa['bluetooth_auta_nazov'] as String?,
       );
 
   String _novyCloudId() =>

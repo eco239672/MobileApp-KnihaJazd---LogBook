@@ -30,8 +30,23 @@ class JazdaPolozka extends StatelessWidget {
           ),
         ),
         title: Text('${jazda.odkial}  →  ${jazda.kam}'),
-        subtitle: Text(
-          '${jazda.zaciatok} – ${jazda.koniec} • ${jazda.typ.nazov}',
+        subtitle: Text.rich(
+          TextSpan(
+            text: '${jazda.zaciatok} – ${jazda.koniec} • ${jazda.typ.nazov}',
+            children: [
+              if (jazda.autoBluetooth == false)
+                const TextSpan(text: ' • bez Bluetooth auta'),
+              if (jazda.ucel.trim().isNotEmpty)
+                TextSpan(text: '\n${jazda.ucel.trim()}')
+              else if (jazda.chybaUcel)
+                TextSpan(
+                  text: '\nDoplň účel jazdy',
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+            ],
+          ),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
         ),
         trailing: Text(
           '${jazda.kilometre.toStringAsFixed(1)} km',

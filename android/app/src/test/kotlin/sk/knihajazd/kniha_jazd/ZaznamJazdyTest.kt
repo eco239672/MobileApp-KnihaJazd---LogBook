@@ -144,6 +144,84 @@ class ZaznamJazdyTest {
     }
 
     @Test
+    fun `reštart sledovania počas jazdy - jazda pokračuje ako jedna`() {
+        val sim = Simulacia("Android zastaví sledovanie na 4 min počas jazdy", LocalDateTime.of(2026, 11, 20, 9, 0))
+        val trasa = SALA_BRATISLAVA
+        sim.istotaAuta = 85
+        sim.nastupil()
+        sim.cakat(minuty = 1, poloha = trasa.poloha(0.0))
+        var prejdene = sim.jazditUsek(trasa, 0.0, 20_000.0)
+        sim.prerusit()
+        val prerusenieOd = prejdene
+        prejdene = sim.jazditUsek(trasa, prejdene, prejdene + 85 / 3.6 * 240) // 4 min bez GPS
+        sim.obnovitPoPreruseni()
+        val prerusenieDo = prejdene + 85 / 3.6 * 10
+        sim.jazditUsek(trasa, prejdene, trasa.dlzkaMetre)
+        sim.istotaAuta = 5
+        sim.vystupil()
+        sim.ist(pesoMinut = 2, od = trasa.poloha(trasa.dlzkaMetre))
+        sim.cakat(minuty = 5, poloha = null)
+
+        sim.vypisat()
+        assertEquals("Reštart nesmie jazdu rozdeliť", 1, sim.jazdy.size)
+        assertEquals(listOf(DovodKonca.VYSTUPIL), sim.dovody)
+        // Počas prerušenia sa ráta priama čiara medzi poslednými bodmi.
+        val strata = (prerusenieDo - prerusenieOd) -
+            vzdialenost(trasa.poloha(prerusenieOd), trasa.poloha(prerusenieDo))
+        assertKilometre(trasa.dlzkaMetre - strata, sim.jazdy.single().prejdeneMetre, toleranciaPercent = 1.5)
+    }
+
+    @Test
+    fun `pád telefónu v zápche - s hláseným autom jazda pokračuje, bez neho sa rozdelí`() {
+        val trasa = SALA_BRATISLAVA
+        val zapcha = 0.6 * trasa.dlzkaMetre
+
+        // 1) Telefón spadne, Google pošle „vystúpil“, ale ďalej hlási auto:
+        //    vystúpenie sa ignoruje a jazda pokračuje.
+        val sAutom = Simulacia("Pád telefónu v zápche, Google ďalej hlási auto", LocalDateTime.of(2026, 11, 20, 7, 0))
+        sAutom.istotaAuta = 85
+        sAutom.nastupil()
+        sAutom.cakat(minuty = 1, poloha = trasa.poloha(0.0))
+        sAutom.jazditUsek(trasa, 0.0, zapcha)
+        sAutom.istotaAuta = 70
+        sAutom.vystupil()
+        sAutom.cakat(minuty = 10, poloha = trasa.poloha(zapcha), presnost = 10f)
+        sAutom.jazditUsek(trasa, zapcha, trasa.dlzkaMetre)
+        sAutom.istotaAuta = 5
+        sAutom.vystupil()
+        sAutom.ist(pesoMinut = 2, od = trasa.poloha(trasa.dlzkaMetre))
+        sAutom.cakat(minuty = 5, poloha = null)
+        sAutom.vypisat()
+        assertEquals(1, sAutom.jazdy.size)
+        assertKilometre(trasa.dlzkaMetre, sAutom.jazdy.single().prejdeneMetre, toleranciaPercent = 1.5)
+
+        // 2) Známe obmedzenie: Google po páde hlási „vystúpil“ bez odhadu auta
+        //    a auto stojí v zápche dlhšie ako 3 min. Jazda sa ukončí a ďalšia
+        //    začne, až keď Google znova hlási „nastúpil“ (tu po 2 min jazdy).
+        //    Kilometre medzi zápchou a týmto hlásením chýbajú.
+        val bezAuta = Simulacia("Pád telefónu v zápche, Google auto nehlási", LocalDateTime.of(2026, 11, 20, 7, 0))
+        bezAuta.istotaAuta = 85
+        bezAuta.nastupil()
+        bezAuta.cakat(minuty = 1, poloha = trasa.poloha(0.0))
+        bezAuta.jazditUsek(trasa, 0.0, zapcha)
+        bezAuta.istotaAuta = null
+        bezAuta.vystupil()
+        bezAuta.cakat(minuty = 10, poloha = trasa.poloha(zapcha), presnost = 10f)
+        val znovaZachytene = bezAuta.jazditUsek(trasa, zapcha, zapcha + 85 / 3.6 * 120)
+        bezAuta.istotaAuta = 85
+        bezAuta.nastupil()
+        bezAuta.jazditUsek(trasa, znovaZachytene, trasa.dlzkaMetre)
+        bezAuta.istotaAuta = 5
+        bezAuta.vystupil()
+        bezAuta.ist(pesoMinut = 2, od = trasa.poloha(trasa.dlzkaMetre))
+        bezAuta.cakat(minuty = 5, poloha = null)
+        bezAuta.vypisat()
+        assertEquals("Bez hláseného auta sa jazda rozdelí na dve", 2, bezAuta.jazdy.size)
+        assertKilometre(zapcha, bezAuta.jazdy[0].prejdeneMetre, toleranciaPercent = 1.5)
+        assertKilometre(trasa.dlzkaMetre - znovaZachytene, bezAuta.jazdy[1].prejdeneMetre, toleranciaPercent = 2.0)
+    }
+
+    @Test
     fun `stará rozpracovaná jazda sa pri obnove uzavrie, čerstvá pokračuje`() {
         var teraz = 1_800_000_000_000L
         val zaznam = ZaznamJazdy(hodiny = { teraz })
@@ -252,6 +330,8 @@ class ZaznamJazdyTest {
         val rychlostMimoMesta: Double,
         val zastavky: List<Zastavka>,
         val tunely: List<ClosedFloatingPointRange<Double>>,
+        /** Android zastaví sledovanie (napr. nedostatok pamäte) na daný počet sekúnd. */
+        val restarty: List<Pair<Double, Int>>,
         val falosneVystupenia: List<Double>,
         val vystupeniaBezOdhadu: List<Double>,
         val podielNepresnych: Double,
@@ -263,6 +343,7 @@ class ZaznamJazdyTest {
                 add("${rychlostMimoMesta.toInt()} km/h")
                 zastavky.groupBy { it.nazov }.forEach { (nazov, z) -> add("$nazov ${z.size}× (${z.joinToString(",") { formatSekund(it.sekund) }})") }
                 if (tunely.isNotEmpty()) add("tunely ${tunely.size}× (${tunely.joinToString(",") { "%.1f km".format((it.endInclusive - it.start) / 1000) }})")
+                if (restarty.isNotEmpty()) add("reštart sledovania ${restarty.size}× (${restarty.joinToString(",") { formatSekund(it.second) }})")
                 if (falosneVystupenia.isNotEmpty()) add("falošné vystúpenie ${falosneVystupenia.size}×")
                 if (vystupeniaBezOdhadu.isNotEmpty()) add("vystúpenie bez odhadu ${vystupeniaBezOdhadu.size}×")
                 add("nepresné body ${(podielNepresnych * 100).toInt()} %")
@@ -276,6 +357,7 @@ class ZaznamJazdyTest {
                 val dlzka = trasa.dlzkaMetre
                 val istotaPriCakani = listOf(70, 70, 10, null)[n.nextInt(4)]
                 val istotaPocasJazdy = listOf(85, 85, 60, 10, null)[n.nextInt(5)]
+                val rychlost = listOf(70.0, 90.0, 110.0, 130.0)[n.nextInt(4)]
 
                 // Úseky, kde nesmie byť nič iné (zastávka, tunel, udalosť), aby sa neprekrývali.
                 val obsadene = mutableListOf<ClosedFloatingPointRange<Double>>()
@@ -315,6 +397,16 @@ class ZaznamJazdyTest {
                         najstMiesto(dlzkaTunela, 5_000.0, dlzka - 5_000)?.let { tunely += it..(it + dlzkaTunela) }
                     }
                 }
+                // Android zastaví sledovanie na 10 s až 5 min (hra, nedostatok pamäte)
+                // a po chvíli ho znova spustí; jazda má pokračovať ako jedna.
+                val restarty = mutableListOf<Pair<Double, Int>>()
+                if (dlzka > 10_000) {
+                    repeat(n.nextInt(3)) {
+                        val sekund = 10 + 10 * n.nextInt(30)
+                        val dlzkaUseku = sekund * (rychlost + 10) / 3.6
+                        najstMiesto(dlzkaUseku, 3_000.0, dlzka - 3_000)?.let { restarty += it to sekund }
+                    }
+                }
                 val falosne = List(n.nextInt(4)) { najstMiesto(0.0) }.filterNotNull()
                 val bezOdhadu = List(n.nextInt(3)) { najstMiesto(0.0) }.filterNotNull()
 
@@ -323,9 +415,10 @@ class ZaznamJazdyTest {
                     cakanieMinut = 1 + n.nextInt(25),
                     istotaPriCakani = istotaPriCakani,
                     istotaPocasJazdy = istotaPocasJazdy,
-                    rychlostMimoMesta = listOf(70.0, 90.0, 110.0, 130.0)[n.nextInt(4)],
+                    rychlostMimoMesta = rychlost,
                     zastavky = zastavky.sortedBy { it.poMetroch },
                     tunely = tunely,
+                    restarty = restarty.sortedBy { it.first },
                     falosneVystupenia = falosne.sorted(),
                     vystupeniaBezOdhadu = bezOdhadu.sorted(),
                     podielNepresnych = listOf(0.0, 0.05, 0.1)[n.nextInt(3)],
@@ -395,10 +488,42 @@ class ZaznamJazdyTest {
 
         private var odKontroly = 0L
         private val nahoda = Random(semienko)
-        private val zaznam = ZaznamJazdy(hodiny = { teraz }, zapis = { zapisy += "${cas(teraz)}  $it" })
+        private var zaznam = novyZaznam()
+
+        /** Rozpracovaná jazda uložená službou, kým ju Android zastavil. */
+        private var ulozenyStav: StavJazdy? = null
+
+        private fun novyZaznam() = ZaznamJazdy(hodiny = { teraz }, zapis = { zapisy += "${cas(teraz)}  $it" })
+
+        /** Android zastaví službu (napr. nedostatok pamäte); stav jazdy ostane uložený. */
+        fun prerusit() {
+            if (!sleduje) return
+            ulozenyStav = zaznam.stav()
+            sleduje = false
+            zapisy += "${cas(teraz)}  [Android zastavil sledovanie]"
+        }
+
+        /** Android službu znova spustí (START_STICKY) a tá obnoví uloženú jazdu. */
+        fun obnovitPoPreruseni() {
+            if (ulozenyStav != null) spustitSledovanie()
+        }
+
+        private fun ulozitJazdu(jazda: DokoncenaJazda) {
+            jazdy += jazda
+            zapisy += "${cas(teraz)}  [JAZDA ULOŽENÁ: ${"%.2f".format(jazda.prejdeneMetre / 1000)} km, " +
+                "${cas(jazda.zaciatok.casMillis)} – ${cas(jazda.koniec.casMillis)}]"
+        }
 
         private fun spustitSledovanie() {
             if (sleduje) return
+            val stav = ulozenyStav
+            if (stav != null) {
+                // To isté ako GpsSledovanieService.obnovitStavJazdy po reštarte.
+                ulozenyStav = null
+                zaznam = novyZaznam()
+                zaznam.obnovit(stav)?.let(::ulozitJazdu)
+                zapisy += "${cas(teraz)}  [sledovanie obnovené po reštarte]"
+            }
             zaznam.spustit()
             sleduje = true
             odGps = 0
@@ -421,7 +546,11 @@ class ZaznamJazdyTest {
                 spustitSledovanie()
                 return
             }
-            if (sleduje) zaznam.vystupil()
+            if (sleduje || ulozenyStav != null) {
+                // Služba sa pri udalosti spustí a obnoví uloženú jazdu.
+                spustitSledovanie()
+                zaznam.vystupil()
+            }
         }
 
         /** 10 sekúnd: GPS bod (ak je signál) a každých 30 s kontrola konca, ako v telefóne. */
@@ -443,14 +572,20 @@ class ZaznamJazdyTest {
                 odKontroly = 0
                 val dovod = zaznam.skontrolovat(istotaAuta) ?: return
                 dovody += dovod
-                zaznam.dokoncit()?.let { jazda ->
-                    jazdy += jazda
-                    zapisy += "${cas(teraz)}  [JAZDA ULOŽENÁ: ${"%.2f".format(jazda.prejdeneMetre / 1000)} km, " +
-                        "${cas(jazda.zaciatok.casMillis)} – ${cas(jazda.koniec.casMillis)}]"
-                }
+                zaznam.dokoncit()?.let(::ulozitJazdu)
                 sleduje = false
                 zapisy += "${cas(teraz)}  [koniec sledovania: $dovod]"
             }
+        }
+
+        /** Jazda po úseku trasy stálou rýchlosťou; vráti, kde auto skončilo. */
+        fun jazditUsek(trasa: Trasa, odMetrov: Double, poMetrov: Double, kmh: Double = 85.0): Double {
+            var prejdene = odMetrov
+            while (prejdene < poMetrov) {
+                prejdene = min(prejdene + kmh / 3.6 * 10, poMetrov)
+                krok(trasa.poloha(prejdene), kmh, presnost = 8f)
+            }
+            return prejdene
         }
 
         fun cakat(minuty: Int, poloha: Pair<Double, Double>?, presnost: Float = 12f) {
@@ -550,8 +685,22 @@ class ZaznamJazdyTest {
             var dalsiaZastavka = 0
             var dalsieFalosne = 0
             var dalsieBezOdhadu = 0
+            var dalsiRestart = 0
+            var zostavaPrerusenie = 0
+            var metrePrerusenia = 0.0
+            var cakaNaPrvyBod = false
+            // Počas prerušenia GPS nebeží; jazda pokračuje priamou čiarou od
+            // posledného bodu, takže zaznamená o rozdiel oblúka a tetivy menej.
+            var strataPrerusenim = 0.0
             var poslednyKrok = false
             while (!poslednyKrok) {
+                val restart = plan.restarty.getOrNull(dalsiRestart)
+                if (restart != null && prejdene >= restart.first && zostavaPrerusenie == 0 && !cakaNaPrvyBod) {
+                    dalsiRestart++
+                    prerusit()
+                    metrePrerusenia = prejdene
+                    zostavaPrerusenie = restart.second / 10
+                }
                 val zastavka = plan.zastavky.getOrNull(dalsiaZastavka)
                 if (zastavka != null && prejdene >= zastavka.poMetroch) {
                     dalsiaZastavka++
@@ -564,6 +713,14 @@ class ZaznamJazdyTest {
                 poslednyKrok = prejdene >= dlzka
                 istotaAuta = plan.istotaPocasJazdy
                 var vynutitPresny = poslednyKrok
+                if (zostavaPrerusenie > 0) {
+                    zostavaPrerusenie--
+                    if (zostavaPrerusenie == 0) {
+                        obnovitPoPreruseni()
+                        cakaNaPrvyBod = true
+                        vynutitPresny = true
+                    }
+                }
                 if (dalsieFalosne < plan.falosneVystupenia.size && prejdene >= plan.falosneVystupenia[dalsieFalosne]) {
                     dalsieFalosne++
                     istotaAuta = 85
@@ -580,6 +737,11 @@ class ZaznamJazdyTest {
                 val vTuneli = plan.tunely.any { prejdene in it }
                 val presnost = if (!vynutitPresny && nahoda.nextDouble() < plan.podielNepresnych) 40f + nahoda.nextInt(60) else 5f + nahoda.nextInt(15)
                 krok(if (vTuneli) null else trasa.poloha(prejdene), kmh, presnost)
+                if (cakaNaPrvyBod) {
+                    cakaNaPrvyBod = false
+                    val oblukMetre = prejdene - metrePrerusenia
+                    strataPrerusenim += oblukMetre - vzdialenost(trasa.poloha(metrePrerusenia), trasa.poloha(prejdene))
+                }
             }
             val prichod = teraz
 
@@ -592,8 +754,9 @@ class ZaznamJazdyTest {
             if (dovody != listOf(DovodKonca.VYSTUPIL)) return "Nesprávny dôvod konca: ${dovody.joinToString()}"
             val jazda = jazdy.single()
             val tolerancia = maxOf(0.015 * dlzka, 150.0)
-            if (abs(jazda.prejdeneMetre - dlzka) > tolerancia) {
-                return "Kilometre: trasa ${"%.2f".format(dlzka / 1000)} km, zaznamenané ${"%.2f".format(jazda.prejdeneMetre / 1000)} km"
+            val ocakavane = dlzka - strataPrerusenim
+            if (abs(jazda.prejdeneMetre - ocakavane) > tolerancia) {
+                return "Kilometre: očakávané ${"%.2f".format(ocakavane / 1000)} km, zaznamenané ${"%.2f".format(jazda.prejdeneMetre / 1000)} km"
             }
             if (abs(jazda.zaciatok.casMillis - odjazd) > 70_000) return "Začiatok ${cas(jazda.zaciatok.casMillis)}, odjazd bol ${cas(odjazd)}"
             if (abs(jazda.koniec.casMillis - prichod) > 20_000) return "Koniec ${cas(jazda.koniec.casMillis)}, príchod bol ${cas(prichod)}"

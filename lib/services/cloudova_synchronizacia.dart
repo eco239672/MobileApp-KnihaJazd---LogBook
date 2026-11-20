@@ -187,6 +187,12 @@ class CloudovaSynchronizacia {
     'koniec': jazda.koniec,
     'kilometre': jazda.kilometre,
     'typ': jazda.typ.name,
+    'ucel': jazda.ucel,
+    'vodic': jazda.vodic,
+    'odkialSuradnice': jazda.odkialSuradnice,
+    'kamSuradnice': jazda.kamSuradnice,
+    'tachometerPo': jazda.tachometerPo,
+    'autoBluetooth': jazda.autoBluetooth,
     'aktualizovane': FieldValue.serverTimestamp(),
   };
 
@@ -212,6 +218,12 @@ class CloudovaSynchronizacia {
       koniec: data['koniec'] as String? ?? '',
       kilometre: kilometre.toDouble(),
       typ: TypJazdy.values.byName(typ),
+      ucel: data['ucel'] as String? ?? '',
+      vodic: data['vodic'] as String? ?? '',
+      odkialSuradnice: data['odkialSuradnice'] as String?,
+      kamSuradnice: data['kamSuradnice'] as String?,
+      tachometerPo: (data['tachometerPo'] as num?)?.toDouble(),
+      autoBluetooth: data['autoBluetooth'] as bool?,
     );
   }
 
@@ -220,6 +232,16 @@ class CloudovaSynchronizacia {
     'priemernaSpotreba': nastavenia.priemernaSpotreba,
     'cenaBenzinu': nastavenia.cenaBenzinu,
     'cenaNafty': nastavenia.cenaNafty,
+    'vin': nastavenia.vin,
+    'znackaTyp': nastavenia.znackaTyp,
+    'kategoria': nastavenia.kategoria,
+    'vodic': nastavenia.vodic,
+    'pociatocnyTachometer': nastavenia.pociatocnyTachometer,
+    'oblubeneMiesta': [
+      for (final miesto in nastavenia.oblubeneMiesta) miesto.naMapu(),
+    ],
+    'bluetoothAuta': nastavenia.bluetoothAuta,
+    'bluetoothAutaNazov': nastavenia.bluetoothAutaNazov,
     'aktualizovane': FieldValue.serverTimestamp(),
   };
 
@@ -229,5 +251,14 @@ class CloudovaSynchronizacia {
         priemernaSpotreba: (data['priemernaSpotreba'] as num?)?.toDouble(),
         cenaBenzinu: (data['cenaBenzinu'] as num?)?.toDouble(),
         cenaNafty: (data['cenaNafty'] as num?)?.toDouble(),
+        vin: data['vin'] as String? ?? '',
+        znackaTyp: data['znackaTyp'] as String? ?? '',
+        kategoria: data['kategoria'] as String? ?? 'M1',
+        vodic: data['vodic'] as String? ?? '',
+        pociatocnyTachometer: (data['pociatocnyTachometer'] as num?)
+            ?.toDouble(),
+        oblubeneMiesta: OblubeneMiesto.zoZoznamu(data['oblubeneMiesta']),
+        bluetoothAuta: data['bluetoothAuta'] as String?,
+        bluetoothAutaNazov: data['bluetoothAutaNazov'] as String?,
       );
 }

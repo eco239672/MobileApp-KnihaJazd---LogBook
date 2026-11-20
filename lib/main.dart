@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'features/jazdy/detail_dna_page.dart';
@@ -17,6 +18,7 @@ import 'models/trasa_bod.dart';
 import 'services/gps_tracking_service.dart';
 import 'services/gps_pozadie_service.dart';
 import 'services/cloudova_synchronizacia.dart';
+import 'services/doplnenie_adries.dart';
 import 'services/excel_export_service.dart';
 import 'services/lokalne_ulozisko.dart';
 import 'services/rozpoznavanie_aktivity_service.dart';
@@ -78,6 +80,10 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
   final _gpsPozadie = GpsPozadieService();
   final _rozpoznavanieAktivity = RozpoznavanieAktivityService();
   final _excelExport = ExcelExportService();
+  late final _doplnenieAdries = DoplnenieAdries(
+    zistitAdresu: _gpsPozadie.zistitAdresu,
+  );
+  var _doplnajuSaAdresy = false;
   late final LokalneUlozisko _ulozisko;
   CloudovaSynchronizacia? _cloudovaSynchronizacia;
   NastaveniaVozidla _nastaveniaVozidla = const NastaveniaVozidla();
@@ -129,7 +135,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     if (stav != AppLifecycleState.resumed) return;
     // Po návrate do aplikácie prenesieme jazdy z pozadia a zálohujeme ich.
     unawaited(
-      _preniestDokonceneJazdyZOzadia().then((_) => _synchronizovatNaPozadi()),
+      _preniestDokonceneJazdyZOzadia()
+          .then((_) => _synchronizovatNaPozadi())
+          .then((_) => _doplnitAdresy()),
     );
   }
 
@@ -144,6 +152,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
         _nastaveniaVozidla = udaje.nastavenia;
         _nacitavaUdaje = false;
       });
+      _odovzdatBluetoothAuta();
     } catch (_) {
       if (!mounted) return;
       setState(() => _nacitavaUdaje = false);
@@ -153,6 +162,146 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     await _obnovitRozpoznavaniePoStarte();
     await _pripravitAutomatickeSledovanie();
     await _pripojitCloudPoStarte();
+    await _doplnitAdresy();
+  }
+
+  /// Natívna služba si pri konci jazdy overí, či bol telefón pripojený
+  /// k Bluetooth auta; potrebuje preto vedieť, ktoré zariadenie je auto.
+  void _odovzdatBluetoothAuta() {
+    if (!_pouzivaAndroidPozadie) return;
+    unawaited(
+      _gpsPozadie
+          .nastavitBluetoothAuta(_nastaveniaVozidla.bluetoothAuta)
+          .catchError((Object _) {}),
+    );
+  }
+
+  /// Nahradí súradnice v jazdách adresou alebo obľúbeným miestom.
+  Future<void> _doplnitAdresy() async {
+    if (_doplnajuSaAdresy || !mounted) return;
+    _doplnajuSaAdresy = true;
+    try {
+      final doplnene = await _doplnenieAdries.doplnit(
+        List.of(_jazdy),
+        _nastaveniaVozidla.oblubeneMiesta,
+      );
+      var ulozene = 0;
+      for (final nova in doplnene) {
+        // Medzičasom mohol používateľ jazdu upraviť: meníme len miesta,
+        // ktoré sú v aktuálnej verzii jazdy stále v súradniciach.
+        final index = _jazdy.indexWhere((jazda) => jazda.id == nova.id);
+        if (index < 0) continue;
+        final aktualna = _jazdy[index];
+        final upravena = aktualna.copyWith(
+          odkial: aktualna.odkialJeSuradnica ? nova.odkial : null,
+          kam: aktualna.kamJeSuradnica ? nova.kam : null,
+        );
+        if (upravena.odkial == aktualna.odkial && upravena.kam == aktualna.kam) {
+          continue;
+        }
+        final ulozena = await _ulozisko.ulozitJazdu(upravena);
+        ulozene++;
+        if (mounted) setState(() => _vlozitAleboNahradit(ulozena));
+      }
+      if (ulozene > 0) unawaited(_synchronizovatNaPozadi());
+    } catch (_) {
+      // Adresy sa skúsia doplniť pri ďalšom otvorení aplikácie.
+    } finally {
+      _doplnajuSaAdresy = false;
+    }
+  }
+
+  /// Pridá obľúbené miesto a ponúkne premenovanie starších jázd v jeho okolí.
+  /// Vráti premenované jazdy (aby ich mohla obnoviť aj otvorená obrazovka dňa).
+  Future<List<Jazda>> _pridatOblubeneMiesto(OblubeneMiesto miesto) async {
+    await _ulozitNastaveniaVozidla(
+      _nastaveniaVozidla.copyWith(
+        oblubeneMiesta: [..._nastaveniaVozidla.oblubeneMiesta, miesto],
+      ),
+    );
+    bool blizko(String? suradnice) {
+      final bod = precitatSuradnice(suradnice);
+      return bod != null &&
+          miesto.vzdialenostOd(bod.latitude, bod.longitude) <=
+              miesto.polomerMetre;
+    }
+
+    final dotknute = _jazdy
+        .where(
+          (jazda) =>
+              (blizko(jazda.odkialSuradnice) && jazda.odkial != miesto.nazov) ||
+              (blizko(jazda.kamSuradnice) && jazda.kam != miesto.nazov),
+        )
+        .toList();
+    if (dotknute.isEmpty || !mounted) {
+      _zobrazitSpravu('Obľúbené miesto „${miesto.nazov}“ je uložené.');
+      return const [];
+    }
+    final premenovat = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Premenovať staršie jazdy na „${miesto.nazov}“?'),
+        content: Text(
+          'V okolí tohto miesta začína alebo končí ${dotknute.length} '
+          '${dotknute.length == 1 ? 'jazda' : 'jázd'}. Ich adresa sa nahradí '
+          'názvom „${miesto.nazov}“ (aj ručne prepísaná).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Nie'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Premenovať'),
+          ),
+        ],
+      ),
+    );
+    if (premenovat != true) return const [];
+    final premenovane = <Jazda>[];
+    for (final jazda in dotknute) {
+      final ulozena = await _ulozisko.ulozitJazdu(
+        jazda.copyWith(
+          odkial: blizko(jazda.odkialSuradnice) ? miesto.nazov : null,
+          kam: blizko(jazda.kamSuradnice) ? miesto.nazov : null,
+        ),
+      );
+      premenovane.add(ulozena);
+      if (mounted) setState(() => _vlozitAleboNahradit(ulozena));
+    }
+    unawaited(_synchronizovatNaPozadi());
+    _zobrazitSpravu('Premenované jazdy: ${premenovane.length}.');
+    return premenovane;
+  }
+
+  /// Aktuálna poloha telefónu (na pridanie obľúbeného miesta).
+  Future<({double latitude, double longitude})?> _aktualnaPoloha() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _zobrazitSpravu('Zapni v telefóne polohu (GPS).');
+        return null;
+      }
+      var povolenie = await Geolocator.checkPermission();
+      if (povolenie == LocationPermission.denied) {
+        povolenie = await Geolocator.requestPermission();
+      }
+      if (povolenie == LocationPermission.denied ||
+          povolenie == LocationPermission.deniedForever) {
+        _zobrazitSpravu('Aplikácia nemá povolenú polohu.');
+        return null;
+      }
+      final poloha = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 30),
+        ),
+      );
+      return (latitude: poloha.latitude, longitude: poloha.longitude);
+    } catch (_) {
+      _zobrazitSpravu('Polohu sa nepodarilo zistiť. Skús to vonku.');
+      return null;
+    }
   }
 
   Future<void> _pripojitCloudPoStarte() async {
@@ -241,20 +390,32 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     String? identifikator,
   }) async {
     String miesto(TrasaBod bod) =>
-        '${bod.latitude.toStringAsFixed(5)}, ${bod.longitude.toStringAsFixed(5)}';
+        formatovatSuradnice(bod.latitude, bod.longitude);
     String cas(DateTime datum) =>
         '${datum.hour.toString().padLeft(2, '0')}:${datum.minute.toString().padLeft(2, '0')}';
-    final ukladanaJazda = Jazda(
-      datum: jazda.zaciatok.cas,
-      odkial: miesto(jazda.zaciatok),
-      kam: miesto(jazda.koniec),
-      zaciatok: cas(jazda.zaciatok.cas),
-      koniec: cas(jazda.koniec.cas),
-      kilometre: jazda.prejdeneMetre / 1000,
-      typ: TypJazdy.sluzobna,
-      // Rovnaký záznam z GPS na pozadí má vždy rovnaké ID, takže sa nemôže
-      // uložiť dvakrát ani pri opakovanom prenose.
-      cloudId: identifikator == null ? null : 'gps-$identifikator',
+    final odkial = miesto(jazda.zaciatok);
+    final kam = miesto(jazda.koniec);
+    // Ak je nastavené Bluetooth auta a telefón k nemu počas jazdy nebol
+    // pripojený, išlo pravdepodobne o iné vozidlo (autobus, cudzie auto).
+    final ineVozidlo = jazda.autoBluetooth == false;
+    // Súradnice zostanú ako dôkaz; adresa sa doplní, keď bude internet.
+    final ukladanaJazda = DoplnenieAdries.pouzitOblubeneMiesta(
+      Jazda(
+        datum: jazda.zaciatok.cas,
+        odkial: odkial,
+        kam: kam,
+        odkialSuradnice: odkial,
+        kamSuradnice: kam,
+        zaciatok: cas(jazda.zaciatok.cas),
+        koniec: cas(jazda.koniec.cas),
+        kilometre: jazda.prejdeneMetre / 1000,
+        typ: ineVozidlo ? TypJazdy.sukromna : TypJazdy.sluzobna,
+        autoBluetooth: jazda.autoBluetooth,
+        // Rovnaký záznam z GPS na pozadí má vždy rovnaké ID, takže sa nemôže
+        // uložiť dvakrát ani pri opakovanom prenose.
+        cloudId: identifikator == null ? null : 'gps-$identifikator',
+      ),
+      _nastaveniaVozidla.oblubeneMiesta,
     );
     try {
       final ulozenaJazda = await _ulozisko.ulozitJazdu(ukladanaJazda);
@@ -302,6 +463,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
         if (ulozena) potvrdene.add(zaznam.identifikator);
       }
       await _gpsPozadie.potvrditUlozenie(potvrdene);
+      if (potvrdene.isNotEmpty) unawaited(_doplnitAdresy());
       if (cakajuceJazdy.isNotEmpty) {
         _zapisatDiagnostiku(
           'Aplikácia preniesla ${potvrdene.length} z ${cakajuceJazdy.length} jázd do knihy jázd',
@@ -337,6 +499,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
     await _ulozisko.ulozitNastavenia(nastavenia);
     if (!mounted) return;
     setState(() => _nastaveniaVozidla = nastavenia);
+    _odovzdatBluetoothAuta();
     unawaited(_synchronizovatNaPozadi());
   }
 
@@ -450,6 +613,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
           ..addAll(udaje.jazdy);
         _nastaveniaVozidla = udaje.nastavenia;
       });
+      _odovzdatBluetoothAuta();
     }
     if (zobrazitVysledok) {
       _zobrazitSpravu('Jazdy a nastavenia sú zosynchronizované s cloudom.');
@@ -535,9 +699,11 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
           datum: formatovatDatum(datum),
           den: datum,
           jazdy: jazdyDna,
+          predvolenyVodic: _nastaveniaVozidla.vodic,
           onJazdaUpravena: _upravitJazdu,
           onJazdaPridana: _pridatJazdu,
           onJazdaVymazana: _vymazatJazdu,
+          onPridatOblubeneMiesto: _pridatOblubeneMiesto,
         ),
       ),
     );
@@ -612,6 +778,9 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                     _synchronizovatDoCloudu(zobrazitVysledok: true),
                 onOdhlasitZCloudu: _odhlasitZCloudu,
                 onVymazatVsetkyJazdy: _vymazatVsetkyJazdy,
+                onPridatOblubeneMiesto: _pridatOblubeneMiesto,
+                onAktualnaPoloha: _aktualnaPoloha,
+                onSparovaneBluetooth: _gpsPozadie.sparovaneBluetooth,
               )
             : _vybranaZalozka == 1
             ? _PrehladPage(
@@ -750,6 +919,11 @@ class _PrehladPage extends StatelessWidget {
     final spotreba = nastavenia.priemernaSpotreba == null
         ? null
         : kilometre * nastavenia.priemernaSpotreba! / 100;
+    final bezUcelu = jazdy.where((jazda) => jazda.chybaUcel).length;
+    final chybaVozidlo =
+        nastavenia.vin.trim().isEmpty ||
+        nastavenia.vodic.trim().isEmpty ||
+        nastavenia.pociatocnyTachometer == null;
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -777,9 +951,38 @@ class _PrehladPage extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          'Súbor bude mať ročný prehľad a samostatný list pre každý mesiac s jazdami.',
+          'Súbor bude mať ročný prehľad s údajmi o vozidle a samostatný list pre každý mesiac: poradové číslo, vodič, čas, odkiaľ – kam, účel, kilometre a stav tachometra.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
+        if (bezUcelu > 0 || chybaVozidlo) ...[
+          const SizedBox(height: 16),
+          Card(
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pred odovzdaním na daňové účely doplň:',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  if (bezUcelu > 0)
+                    Text('• účel pri $bezUcelu služobných jazdách'),
+                  if (nastavenia.vin.trim().isEmpty)
+                    const Text('• VIN vozidla (Nastavenia)'),
+                  if (nastavenia.vodic.trim().isEmpty)
+                    const Text('• meno vodiča (Nastavenia)'),
+                  if (nastavenia.pociatocnyTachometer == null)
+                    const Text(
+                      '• stav tachometra na začiatku evidencie (Nastavenia)',
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -357,7 +357,15 @@ class GpsSledovanieService : Service() {
                 .put("koniecCasMillis", koniec.casMillis)
                 .put("koniecPresnost", koniec.presnostMetre)
                 .put("koniecRychlost", koniec.rychlostMetreZaSekundu)
-                .put("prejdeneMetre", kilometre),
+                .put("prejdeneMetre", kilometre)
+                .apply {
+                    // Ak je nastavené Bluetooth auta: bola to jazda vlastným autom?
+                    BluetoothAuta.bolPripojenyPocasJazdy(
+                        this@GpsSledovanieService,
+                        zaciatok.casMillis,
+                        koniec.casMillis,
+                    )?.let { put("autoBluetooth", it) }
+                },
         )
         // Bezpečnostný strop: pri dlhšom nepoužití aplikácie nezaberú záznamy
         // o dokončených jazdách viac než zanedbateľné miesto v telefóne.

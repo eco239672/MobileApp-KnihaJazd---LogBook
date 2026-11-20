@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/nastavenia_vozidla.dart';
 import '../../services/cloudova_synchronizacia.dart';
+import '../../services/gps_pozadie_service.dart';
 import '../../services/rozpoznavanie_aktivity_service.dart';
 import '../../utils/decimalny_vstup.dart';
 import 'diagnostika_page.dart';
@@ -26,6 +28,9 @@ class NastaveniaVozidlaPage extends StatefulWidget {
     required this.onSynchronizovat,
     required this.onOdhlasitZCloudu,
     this.onVymazatVsetkyJazdy,
+    this.onPridatOblubeneMiesto,
+    this.onAktualnaPoloha,
+    this.onSparovaneBluetooth,
     super.key,
   });
 
@@ -51,6 +56,14 @@ class NastaveniaVozidlaPage extends StatefulWidget {
   /// Vráti počet vymazaných jázd.
   final Future<int> Function()? onVymazatVsetkyJazdy;
 
+  /// Pridá obľúbené miesto (a ponúkne premenovanie starších jázd).
+  final Future<void> Function(OblubeneMiesto)? onPridatOblubeneMiesto;
+  final Future<({double latitude, double longitude})?> Function()?
+  onAktualnaPoloha;
+
+  /// Spárované Bluetooth zariadenia telefónu (na výber auta).
+  final Future<List<BluetoothZariadenie>> Function()? onSparovaneBluetooth;
+
   @override
   State<NastaveniaVozidlaPage> createState() => _NastaveniaVozidlaPageState();
 }
@@ -62,6 +75,13 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
   late final TextEditingController _spotreba;
   late final TextEditingController _cenaBenzinu;
   late final TextEditingController _cenaNafty;
+  late final TextEditingController _vin;
+  late final TextEditingController _znackaTyp;
+  late final TextEditingController _kategoria;
+  late final TextEditingController _vodic;
+  late final TextEditingController _tachometer;
+  var _pridavaMiesto = false;
+  var _vyberaBluetooth = false;
   StavRozpoznavaniaAktivity? _stavRozpoznavania;
   var _meniSaRozpoznavanie = false;
   var _otvaraNastaveniaPolohy = false;
@@ -88,6 +108,13 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     _cenaNafty = TextEditingController(
       text: widget.nastavenia.cenaNafty?.toString(),
     );
+    _vin = TextEditingController(text: widget.nastavenia.vin);
+    _znackaTyp = TextEditingController(text: widget.nastavenia.znackaTyp);
+    _kategoria = TextEditingController(text: widget.nastavenia.kategoria);
+    _vodic = TextEditingController(text: widget.nastavenia.vodic);
+    _tachometer = TextEditingController(
+      text: widget.nastavenia.pociatocnyTachometer?.toString(),
+    );
     _nacitatStavRozpoznavania();
   }
 
@@ -101,11 +128,21 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     if (nove.spz != stare.spz ||
         nove.priemernaSpotreba != stare.priemernaSpotreba ||
         nove.cenaBenzinu != stare.cenaBenzinu ||
-        nove.cenaNafty != stare.cenaNafty) {
+        nove.cenaNafty != stare.cenaNafty ||
+        nove.vin != stare.vin ||
+        nove.znackaTyp != stare.znackaTyp ||
+        nove.kategoria != stare.kategoria ||
+        nove.vodic != stare.vodic ||
+        nove.pociatocnyTachometer != stare.pociatocnyTachometer) {
       _spz.text = nove.spz;
       _spotreba.text = nove.priemernaSpotreba?.toString() ?? '';
       _cenaBenzinu.text = nove.cenaBenzinu?.toString() ?? '';
       _cenaNafty.text = nove.cenaNafty?.toString() ?? '';
+      _vin.text = nove.vin;
+      _znackaTyp.text = nove.znackaTyp;
+      _kategoria.text = nove.kategoria;
+      _vodic.text = nove.vodic;
+      _tachometer.text = nove.pociatocnyTachometer?.toString() ?? '';
     }
   }
 
@@ -117,6 +154,11 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     _spotreba.dispose();
     _cenaBenzinu.dispose();
     _cenaNafty.dispose();
+    _vin.dispose();
+    _znackaTyp.dispose();
+    _kategoria.dispose();
+    _vodic.dispose();
+    _tachometer.dispose();
     super.dispose();
   }
 
@@ -125,12 +167,21 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
 
     FocusScope.of(context).unfocus();
     try {
+      // copyWith: obľúbené miesta a Bluetooth auta sa ukladajú samostatne
+      // a pri uložení formulára sa nesmú stratiť.
       await widget.onUlozit(
-        NastaveniaVozidla(
+        widget.nastavenia.copyWith(
           spz: _spz.text.trim().toUpperCase(),
           priemernaSpotreba: _cislo(_spotreba.text),
           cenaBenzinu: _cislo(_cenaBenzinu.text),
           cenaNafty: _cislo(_cenaNafty.text),
+          vin: _vin.text.trim().toUpperCase(),
+          znackaTyp: _znackaTyp.text.trim(),
+          kategoria: _kategoria.text.trim().isEmpty
+              ? 'M1'
+              : _kategoria.text.trim().toUpperCase(),
+          vodic: _vodic.text.trim(),
+          pociatocnyTachometer: _cislo(_tachometer.text),
         ),
       );
       if (!mounted) return;
@@ -359,6 +410,140 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
         : null;
   }
 
+  String? _vinValidator(String? hodnota) {
+    final vin = (hodnota ?? '').trim();
+    if (vin.isEmpty) return null;
+    return vin.length == 17 ? null : 'VIN má 17 znakov (teraz ${vin.length}).';
+  }
+
+  void _sprava(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _pridatAktualnuPolohu() async {
+    final poloha = widget.onAktualnaPoloha;
+    final pridat = widget.onPridatOblubeneMiesto;
+    if (poloha == null || pridat == null) return;
+    final nazov = await showDialog<String>(
+      context: context,
+      builder: (context) => const _NazovMiestaDialog(),
+    );
+    if (nazov == null || nazov.trim().isEmpty || !mounted) return;
+    setState(() => _pridavaMiesto = true);
+    try {
+      final bod = await poloha();
+      if (bod == null) return;
+      await pridat(
+        OblubeneMiesto(
+          nazov: nazov.trim(),
+          latitude: bod.latitude,
+          longitude: bod.longitude,
+        ),
+      );
+    } catch (_) {
+      _sprava('Obľúbené miesto sa nepodarilo uložiť.');
+    } finally {
+      if (mounted) setState(() => _pridavaMiesto = false);
+    }
+  }
+
+  Future<void> _odstranitMiesto(OblubeneMiesto miesto) async {
+    final potvrdene = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Odstrániť „${miesto.nazov}“?'),
+        content: const Text(
+          'Staršie jazdy si názov ponechajú. Nové jazdy tu dostanú adresu.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Zrušiť'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Odstrániť'),
+          ),
+        ],
+      ),
+    );
+    if (potvrdene != true || !mounted) return;
+    try {
+      await widget.onUlozit(
+        widget.nastavenia.copyWith(
+          oblubeneMiesta: [
+            for (final polozka in widget.nastavenia.oblubeneMiesta)
+              if (!identical(polozka, miesto)) polozka,
+          ],
+        ),
+      );
+    } catch (_) {
+      _sprava('Miesto sa nepodarilo odstrániť.');
+    }
+  }
+
+  Future<void> _vybratBluetoothAuto() async {
+    final nacitat = widget.onSparovaneBluetooth;
+    if (nacitat == null) return;
+    setState(() => _vyberaBluetooth = true);
+    List<BluetoothZariadenie> zariadenia;
+    try {
+      zariadenia = await nacitat();
+    } on PlatformException {
+      _sprava(
+        'Bez povolenia „Zariadenia v okolí“ nevidím spárované zariadenia. Povoľ ho v nastaveniach aplikácie.',
+      );
+      return;
+    } catch (_) {
+      _sprava('Zoznam Bluetooth zariadení sa nepodarilo načítať.');
+      return;
+    } finally {
+      if (mounted) setState(() => _vyberaBluetooth = false);
+    }
+    if (!mounted) return;
+    if (zariadenia.isEmpty) {
+      _sprava(
+        'Telefón nemá spárované žiadne zariadenie. Najprv ho spáruj s autom cez Bluetooth.',
+      );
+      return;
+    }
+    final vybrane = await showDialog<BluetoothZariadenie>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Ktoré zariadenie je tvoje auto?'),
+        children: [
+          for (final zariadenie in zariadenia)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(zariadenie),
+              child: Text(zariadenie.nazov),
+            ),
+        ],
+      ),
+    );
+    if (vybrane == null || !mounted) return;
+    try {
+      await widget.onUlozit(
+        widget.nastavenia.copyWith(
+          bluetoothAuta: vybrane.adresa,
+          bluetoothAutaNazov: vybrane.nazov,
+        ),
+      );
+    } catch (_) {
+      _sprava('Výber auta sa nepodarilo uložiť.');
+    }
+  }
+
+  Future<void> _zrusitBluetoothAuto() async {
+    try {
+      await widget.onUlozit(
+        widget.nastavenia.copyWith(bluetoothAuta: null, bluetoothAutaNazov: null),
+      );
+    } catch (_) {
+      _sprava('Zmenu sa nepodarilo uložiť.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -378,7 +563,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                   Text('Vozidlo', style: theme.textTheme.titleLarge),
                   const SizedBox(height: 4),
                   Text(
-                    'Údaje slúžia na identifikáciu auta a orientačný výpočet paliva.',
+                    'Údaje pre elektronickú knihu jázd (export do Excelu) a orientačný výpočet paliva.',
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 16),
@@ -391,6 +576,60 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
                       prefixIcon: Icon(Icons.directions_car_outlined),
                     ),
                     validator: _spzValidator,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _vin,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'VIN',
+                      hintText: '17 znakov z osvedčenia o evidencii',
+                    ),
+                    validator: _vinValidator,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _znackaTyp,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Názov a typ vozidla',
+                      hintText: 'napr. Škoda Octavia 2.0 TDI',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _kategoria,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Kategória vozidla',
+                      hintText: 'osobné auto = M1',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _vodic,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Vodič (meno a priezvisko)',
+                      helperText: 'Použije sa pri každej jazde, ak v nej nezadáš iného vodiča.',
+                      helperMaxLines: 2,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _tachometer,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [decimalnyVstup],
+                    decoration: const InputDecoration(
+                      labelText: 'Stav tachometra na začiatku evidencie',
+                      suffixText: 'km',
+                      helperText: 'Stav pred prvou jazdou v aplikácii. Ďalšie stavy sa dopočítajú.',
+                      helperMaxLines: 2,
+                    ),
+                    validator: (hodnota) =>
+                        _kladneCislo(hodnota, 'stav tachometra'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -449,6 +688,104 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
             ),
           ),
         ),
+        if (widget.onPridatOblubeneMiesto != null) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Obľúbené miesta', style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Jazda, ktorá začne alebo skončí do 150 m od takého miesta, dostane namiesto adresy jeho názov. Miesto pridáš aj z detailu jazdy (hviezdička).',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final miesto in widget.nastavenia.oblubeneMiesta)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.star),
+                      title: Text(miesto.nazov),
+                      trailing: IconButton(
+                        tooltip: 'Odstrániť',
+                        onPressed: () => _odstranitMiesto(miesto),
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ),
+                  if (widget.onAktualnaPoloha != null)
+                    OutlinedButton.icon(
+                      onPressed: _pridavaMiesto ? null : _pridatAktualnuPolohu,
+                      icon: _pridavaMiesto
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.add_location_alt_outlined),
+                      label: const Text('Pridať miesto, kde práve som'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        if (widget.onSparovaneBluetooth != null) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Rozpoznanie auta (Bluetooth)',
+                    style: theme.textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.nastavenia.bluetoothAuta == null
+                        ? 'Nevybrané: každá jazda sa zaznamená ako služobná. Ak vyberieš Bluetooth svojho auta, jazda bez pripojenia k nemu (autobus, cudzie auto) sa zaznamená ako súkromná.'
+                        : 'Auto: ${widget.nastavenia.bluetoothAutaNazov ?? widget.nastavenia.bluetoothAuta}. Jazda bez pripojenia k nemu sa zaznamená ako súkromná.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _vyberaBluetooth
+                            ? null
+                            : _vybratBluetoothAuto,
+                        icon: _vyberaBluetooth
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.bluetooth),
+                        label: Text(
+                          widget.nastavenia.bluetoothAuta == null
+                              ? 'Vybrať auto'
+                              : 'Zmeniť',
+                        ),
+                      ),
+                      if (widget.nastavenia.bluetoothAuta != null) ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: _zrusitBluetoothAuto,
+                          child: const Text('Zrušiť výber'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -679,6 +1016,50 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _NazovMiestaDialog extends StatefulWidget {
+  const _NazovMiestaDialog();
+
+  @override
+  State<_NazovMiestaDialog> createState() => _NazovMiestaDialogState();
+}
+
+class _NazovMiestaDialogState extends State<_NazovMiestaDialog> {
+  final _nazov = TextEditingController();
+
+  @override
+  void dispose() {
+    _nazov.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Obľúbené miesto'),
+      content: TextField(
+        controller: _nazov,
+        autofocus: true,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          labelText: 'Názov',
+          hintText: 'napr. Domov, Práca, Sklad',
+        ),
+        onSubmitted: (hodnota) => Navigator.of(context).pop(hodnota),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Zrušiť'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_nazov.text),
+          child: const Text('Uložiť'),
+        ),
       ],
     );
   }
