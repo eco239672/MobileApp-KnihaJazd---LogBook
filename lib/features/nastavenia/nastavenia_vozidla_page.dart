@@ -1,15 +1,14 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../models/nastavenia_vozidla.dart';
 import '../../services/cloudova_synchronizacia.dart';
 import '../../services/gps_pozadie_service.dart';
 import '../../services/rozpoznavanie_aktivity_service.dart';
 import '../../utils/decimalny_vstup.dart';
-import '../oblubene_miesta/nazov_miesta_dialog.dart';
 import 'diagnostika_page.dart';
+import 'karty/bluetooth_auta_karta.dart';
+import 'karty/oblubene_miesta_karta.dart';
+import 'karty/vymazanie_jazd_karta.dart';
 
 class NastaveniaVozidlaPage extends StatefulWidget {
   const NastaveniaVozidlaPage({
@@ -81,19 +80,10 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
   late final TextEditingController _kategoria;
   late final TextEditingController _vodic;
   late final TextEditingController _tachometer;
-  var _pridavaMiesto = false;
-  var _vyberaBluetooth = false;
   StavRozpoznavaniaAktivity? _stavRozpoznavania;
   var _meniSaRozpoznavanie = false;
   var _otvaraNastaveniaPolohy = false;
   var _pracujeSCloudom = false;
-  var _mazeJazdy = false;
-
-  // Ochrana pred omylom: tlačidlo treba stlačiť niekoľkokrát po sebe.
-  static const _potrebnychStlaceni = 3;
-  static const _limitMedziStlaceniami = Duration(seconds: 3);
-  var _stlaceniaMazania = 0;
-  Timer? _vynulovanieStlaceni;
 
   @override
   void initState() {
@@ -149,7 +139,6 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
 
   @override
   void dispose() {
-    _vynulovanieStlaceni?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _spz.dispose();
     _spotreba.dispose();
@@ -329,67 +318,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     }
   }
 
-  void _stlacitMazanie() {
-    _vynulovanieStlaceni?.cancel();
-    final stlacenia = _stlaceniaMazania + 1;
-    if (stlacenia < _potrebnychStlaceni) {
-      setState(() => _stlaceniaMazania = stlacenia);
-      // Bez ďalšieho stlačenia do 3 sekúnd sa počítadlo vynuluje.
-      _vynulovanieStlaceni = Timer(_limitMedziStlaceniami, () {
-        if (mounted) setState(() => _stlaceniaMazania = 0);
-      });
-      return;
-    }
-    setState(() => _stlaceniaMazania = 0);
-    unawaited(_vymazatVsetkyJazdy());
-  }
 
-  Future<void> _vymazatVsetkyJazdy() async {
-    final akcia = widget.onVymazatVsetkyJazdy;
-    if (akcia == null) return;
-    final prihlaseny = widget.cloudovyUcet != null;
-    final potvrdene = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Vymazať všetky jazdy?'),
-        content: Text(
-          prihlaseny
-              ? 'Natrvalo sa vymažú všetky jazdy v telefóne aj v cloude. Nastavenia vozidla zostanú. Túto akciu nie je možné vrátiť.'
-              : 'Natrvalo sa vymažú všetky jazdy v telefóne. Nastavenia vozidla zostanú. Túto akciu nie je možné vrátiť.\n\nAk máš jazdy zálohované v cloude, najprv sa prihlás cez Google, inak sa pri ďalšom prihlásení z cloudu vrátia.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Zrušiť'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Vymazať všetko'),
-          ),
-        ],
-      ),
-    );
-    if (potvrdene != true || !mounted) return;
-    setState(() => _mazeJazdy = true);
-    try {
-      final pocet = await akcia();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Vymazaných jázd: $pocet.')),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Jazdy sa nepodarilo vymazať.')),
-      );
-    } finally {
-      if (mounted) setState(() => _mazeJazdy = false);
-    }
-  }
 
   double? _cislo(String hodnota) {
     final orezanaHodnota = hodnota.trim();
@@ -417,133 +346,10 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     return vin.length == 17 ? null : 'VIN má 17 znakov (teraz ${vin.length}).';
   }
 
-  void _sprava(String text) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
-  }
 
-  Future<void> _pridatAktualnuPolohu() async {
-    final poloha = widget.onAktualnaPoloha;
-    final pridat = widget.onPridatOblubeneMiesto;
-    if (poloha == null || pridat == null) return;
-    final nazov = await showDialog<String>(
-      context: context,
-      builder: (context) => const NazovMiestaDialog(),
-    );
-    if (nazov == null || nazov.trim().isEmpty || !mounted) return;
-    setState(() => _pridavaMiesto = true);
-    try {
-      final bod = await poloha();
-      if (bod == null) return;
-      await pridat(
-        OblubeneMiesto(
-          nazov: nazov.trim(),
-          latitude: bod.latitude,
-          longitude: bod.longitude,
-        ),
-      );
-    } catch (_) {
-      _sprava('Obľúbené miesto sa nepodarilo uložiť.');
-    } finally {
-      if (mounted) setState(() => _pridavaMiesto = false);
-    }
-  }
 
-  Future<void> _odstranitMiesto(OblubeneMiesto miesto) async {
-    final potvrdene = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Odstrániť „${miesto.nazov}“?'),
-        content: const Text(
-          'Staršie jazdy si názov ponechajú. Nové jazdy tu dostanú adresu.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Zrušiť'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Odstrániť'),
-          ),
-        ],
-      ),
-    );
-    if (potvrdene != true || !mounted) return;
-    try {
-      await widget.onUlozit(
-        widget.nastavenia.copyWith(
-          oblubeneMiesta: [
-            for (final polozka in widget.nastavenia.oblubeneMiesta)
-              if (!identical(polozka, miesto)) polozka,
-          ],
-        ),
-      );
-    } catch (_) {
-      _sprava('Miesto sa nepodarilo odstrániť.');
-    }
-  }
 
-  Future<void> _vybratBluetoothAuto() async {
-    final nacitat = widget.onSparovaneBluetooth;
-    if (nacitat == null) return;
-    setState(() => _vyberaBluetooth = true);
-    List<BluetoothZariadenie> zariadenia;
-    try {
-      zariadenia = await nacitat();
-    } on PlatformException {
-      _sprava(
-        'Bez povolenia „Zariadenia v okolí“ nevidím spárované zariadenia. Povoľ ho v nastaveniach aplikácie.',
-      );
-      return;
-    } catch (_) {
-      _sprava('Zoznam Bluetooth zariadení sa nepodarilo načítať.');
-      return;
-    } finally {
-      if (mounted) setState(() => _vyberaBluetooth = false);
-    }
-    if (!mounted) return;
-    if (zariadenia.isEmpty) {
-      _sprava(
-        'Telefón nemá spárované žiadne zariadenie. Najprv ho spáruj s autom cez Bluetooth.',
-      );
-      return;
-    }
-    final vybrane = await showDialog<BluetoothZariadenie>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Ktoré zariadenie je tvoje auto?'),
-        children: [
-          for (final zariadenie in zariadenia)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(context).pop(zariadenie),
-              child: Text(zariadenie.nazov),
-            ),
-        ],
-      ),
-    );
-    if (vybrane == null || !mounted) return;
-    try {
-      await widget.onUlozit(
-        widget.nastavenia.copyWith(
-          bluetoothAuta: vybrane.adresa,
-          bluetoothAutaNazov: vybrane.nazov,
-        ),
-      );
-    } catch (_) {
-      _sprava('Výber auta sa nepodarilo uložiť.');
-    }
-  }
 
-  Future<void> _zrusitBluetoothAuto() async {
-    try {
-      await widget.onUlozit(
-        widget.nastavenia.copyWith(bluetoothAuta: null, bluetoothAutaNazov: null),
-      );
-    } catch (_) {
-      _sprava('Zmenu sa nepodarilo uložiť.');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -691,100 +497,19 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
         ),
         if (widget.onPridatOblubeneMiesto != null) ...[
           const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Obľúbené miesta', style: theme.textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Jazda, ktorá začne alebo skončí do 150 m od takého miesta, dostane namiesto adresy jeho názov. Miesto pridáš aj z detailu jazdy (hviezdička).',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  for (final miesto in widget.nastavenia.oblubeneMiesta)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.star),
-                      title: Text(miesto.nazov),
-                      trailing: IconButton(
-                        tooltip: 'Odstrániť',
-                        onPressed: () => _odstranitMiesto(miesto),
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ),
-                  if (widget.onAktualnaPoloha != null)
-                    OutlinedButton.icon(
-                      onPressed: _pridavaMiesto ? null : _pridatAktualnuPolohu,
-                      icon: _pridavaMiesto
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.add_location_alt_outlined),
-                      label: const Text('Pridať miesto, kde práve som'),
-                    ),
-                ],
-              ),
-            ),
+          OblubeneMiestaKarta(
+            nastavenia: widget.nastavenia,
+            onUlozit: widget.onUlozit,
+            onPridat: widget.onPridatOblubeneMiesto!,
+            onAktualnaPoloha: widget.onAktualnaPoloha,
           ),
         ],
         if (widget.onSparovaneBluetooth != null) ...[
           const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Rozpoznanie auta (Bluetooth)',
-                    style: theme.textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.nastavenia.bluetoothAuta == null
-                        ? 'Nevybrané: každá jazda sa zaznamená ako služobná. Ak vyberieš Bluetooth svojho auta, jazda bez pripojenia k nemu (autobus, cudzie auto) sa zaznamená ako súkromná.'
-                        : 'Auto: ${widget.nastavenia.bluetoothAutaNazov ?? widget.nastavenia.bluetoothAuta}. Jazda bez pripojenia k nemu sa zaznamená ako súkromná.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: _vyberaBluetooth
-                            ? null
-                            : _vybratBluetoothAuto,
-                        icon: _vyberaBluetooth
-                            ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.bluetooth),
-                        label: Text(
-                          widget.nastavenia.bluetoothAuta == null
-                              ? 'Vybrať auto'
-                              : 'Zmeniť',
-                        ),
-                      ),
-                      if (widget.nastavenia.bluetoothAuta != null) ...[
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: _zrusitBluetoothAuto,
-                          child: const Text('Zrušiť výber'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
+          BluetoothAutaKarta(
+            nastavenia: widget.nastavenia,
+            onUlozit: widget.onUlozit,
+            onSparovane: widget.onSparovaneBluetooth!,
           ),
         ],
         const SizedBox(height: 16),
@@ -960,61 +685,9 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
         ),
         if (widget.onVymazatVsetkyJazdy != null) ...[
           const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Údaje', style: theme.textTheme.titleLarge),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.warning_amber_rounded,
-                        color: theme.colorScheme.error,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Vymaže natrvalo všetky jazdy. Pre istotu treba tlačidlo stlačiť $_potrebnychStlaceni× po sebe.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _mazeJazdy ? null : _stlacitMazanie,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: theme.colorScheme.error,
-                        foregroundColor: theme.colorScheme.onError,
-                      ),
-                      icon: _mazeJazdy
-                          ? SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: theme.colorScheme.onError,
-                              ),
-                            )
-                          : const Icon(Icons.delete_forever_outlined),
-                      label: Text(
-                        _stlaceniaMazania == 0
-                            ? 'Vymazať všetky jazdy'
-                            : 'Stlač ešte ${_potrebnychStlaceni - _stlaceniaMazania}× pre vymazanie',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          VymazanieJazdKarta(
+            prihlaseny: widget.cloudovyUcet != null,
+            onVymazat: widget.onVymazatVsetkyJazdy!,
           ),
         ],
       ],
