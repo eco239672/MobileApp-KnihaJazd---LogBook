@@ -8,6 +8,7 @@ import '../../services/cloudova_synchronizacia.dart';
 import '../../services/gps_pozadie_service.dart';
 import '../../services/rozpoznavanie_aktivity_service.dart';
 import '../../utils/decimalny_vstup.dart';
+import '../oblubene_miesta/nazov_miesta_dialog.dart';
 import 'diagnostika_page.dart';
 
 class NastaveniaVozidlaPage extends StatefulWidget {
@@ -427,7 +428,7 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
     if (poloha == null || pridat == null) return;
     final nazov = await showDialog<String>(
       context: context,
-      builder: (context) => const _NazovMiestaDialog(),
+      builder: (context) => const NazovMiestaDialog(),
     );
     if (nazov == null || nazov.trim().isEmpty || !mounted) return;
     setState(() => _pridavaMiesto = true);
@@ -1016,50 +1017,6 @@ class _NastaveniaVozidlaPageState extends State<NastaveniaVozidlaPage>
             ),
           ),
         ],
-      ],
-    );
-  }
-}
-
-class _NazovMiestaDialog extends StatefulWidget {
-  const _NazovMiestaDialog();
-
-  @override
-  State<_NazovMiestaDialog> createState() => _NazovMiestaDialogState();
-}
-
-class _NazovMiestaDialogState extends State<_NazovMiestaDialog> {
-  final _nazov = TextEditingController();
-
-  @override
-  void dispose() {
-    _nazov.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Obľúbené miesto'),
-      content: TextField(
-        controller: _nazov,
-        autofocus: true,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          labelText: 'Názov',
-          hintText: 'napr. Domov, Práca, Sklad',
-        ),
-        onSubmitted: (hodnota) => Navigator.of(context).pop(hodnota),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Zrušiť'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_nazov.text),
-          child: const Text('Uložiť'),
-        ),
       ],
     );
   }

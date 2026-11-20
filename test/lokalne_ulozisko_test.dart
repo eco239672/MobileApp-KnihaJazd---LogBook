@@ -7,6 +7,8 @@ import 'package:kniha_jazd/services/lokalne_ulozisko.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'support/pamatove_lokalne_ulozisko.dart';
+
 void main() {
   setUpAll(() {
     sqfliteFfiInit();

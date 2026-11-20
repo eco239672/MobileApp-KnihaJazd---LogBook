@@ -3,8 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kniha_jazd/features/jazdy/detail_dna_page.dart';
 import 'package:kniha_jazd/main.dart';
 import 'package:kniha_jazd/models/jazda.dart';
-import 'package:kniha_jazd/services/lokalne_ulozisko.dart';
 import 'package:kniha_jazd/utils/format_datumu.dart';
+
+import 'support/pamatove_lokalne_ulozisko.dart';
 
 void main() {
   testWidgets('zobrazí prázdnu úvodnú obrazovku knihy jázd', (tester) async {

@@ -9,8 +9,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'features/jazdy/detail_dna_page.dart';
-import 'features/jazdy/widgets/jazda_polozka.dart';
 import 'features/nastavenia/nastavenia_vozidla_page.dart';
+import 'features/prehlad/prehlad_page.dart';
 import 'models/jazda.dart';
 import 'models/nastavenia_vozidla.dart';
 import 'models/synchronizacia.dart';
@@ -783,7 +783,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                 onSparovaneBluetooth: _gpsPozadie.sparovaneBluetooth,
               )
             : _vybranaZalozka == 1
-            ? _PrehladPage(
+            ? PrehladPage(
                 jazdy: _jazdy,
                 nastavenia: _nastaveniaVozidla,
                 exportuje: _exportujeExcel,
@@ -820,7 +820,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                       child: Row(
                         children: [
                           Expanded(
-                            child: _Statistika(
+                            child: Statistika(
                               popis: 'Prejdené kilometre',
                               hodnota: '${kilometre.toStringAsFixed(1)} km',
                             ),
@@ -833,7 +833,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                           ),
                           const SizedBox(width: 20),
                           Expanded(
-                            child: _Statistika(
+                            child: Statistika(
                               popis: 'Záznamy',
                               hodnota: '${jazdyVMesiaci.length}',
                             ),
@@ -846,7 +846,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                           ),
                           const SizedBox(width: 20),
                           Expanded(
-                            child: _Statistika(
+                            child: Statistika(
                               popis: 'Odhad paliva',
                               hodnota: spotrebaPaliva == null
                                   ? '— l'
@@ -861,7 +861,7 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
                   Text('Jazdy podľa dní', style: theme.textTheme.titleLarge),
                   const SizedBox(height: 4),
                   ...jazdyPodlaDna.entries.map(
-                    (den) => _DennyBlok(
+                    (den) => DennyBlok(
                       datum: formatovatDatum(den.key),
                       jazdy: den.value,
                       onTap: () => _otvoritDetailDna(den.key),
@@ -891,159 +891,6 @@ class _KnihaJazdHomePageState extends State<KnihaJazdHomePage>
             selectedIcon: Icon(Icons.settings),
             label: 'Nastavenia',
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PrehladPage extends StatelessWidget {
-  const _PrehladPage({
-    required this.jazdy,
-    required this.nastavenia,
-    required this.exportuje,
-    required this.onExportovat,
-  });
-
-  final List<Jazda> jazdy;
-  final NastaveniaVozidla nastavenia;
-  final bool exportuje;
-  final Future<void> Function() onExportovat;
-
-  @override
-  Widget build(BuildContext context) {
-    final kilometre = jazdy.fold<double>(
-      0,
-      (sucet, jazda) => sucet + jazda.kilometre,
-    );
-    final spotreba = nastavenia.priemernaSpotreba == null
-        ? null
-        : kilometre * nastavenia.priemernaSpotreba! / 100;
-    final bezUcelu = jazdy.where((jazda) => jazda.chybaUcel).length;
-    final chybaVozidlo =
-        nastavenia.vin.trim().isEmpty ||
-        nastavenia.vodic.trim().isEmpty ||
-        nastavenia.pociatocnyTachometer == null;
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Prehľad jázd', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          'Celkom ${jazdy.length} záznamov a ${kilometre.toStringAsFixed(1)} km.',
-        ),
-        if (spotreba != null)
-          Text('Odhadovaná spotreba paliva: ${spotreba.toStringAsFixed(1)} l.'),
-        const SizedBox(height: 24),
-        FilledButton.icon(
-          onPressed: exportuje ? null : onExportovat,
-          icon: exportuje
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.file_download_outlined),
-          label: Text(
-            exportuje ? 'Pripravujem Excel…' : 'Exportovať do Excelu',
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Súbor bude mať ročný prehľad s údajmi o vozidle a samostatný list pre každý mesiac: poradové číslo, vodič, čas, odkiaľ – kam, účel, kilometre a stav tachometra.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        if (bezUcelu > 0 || chybaVozidlo) ...[
-          const SizedBox(height: 16),
-          Card(
-            color: Theme.of(context).colorScheme.errorContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Pred odovzdaním na daňové účely doplň:',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  if (bezUcelu > 0)
-                    Text('• účel pri $bezUcelu služobných jazdách'),
-                  if (nastavenia.vin.trim().isEmpty)
-                    const Text('• VIN vozidla (Nastavenia)'),
-                  if (nastavenia.vodic.trim().isEmpty)
-                    const Text('• meno vodiča (Nastavenia)'),
-                  if (nastavenia.pociatocnyTachometer == null)
-                    const Text(
-                      '• stav tachometra na začiatku evidencie (Nastavenia)',
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _Statistika extends StatelessWidget {
-  const _Statistika({required this.popis, required this.hodnota});
-
-  final String popis;
-  final String hodnota;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(popis, style: theme.textTheme.labelMedium),
-        const SizedBox(height: 4),
-        Text(hodnota, style: theme.textTheme.headlineSmall),
-      ],
-    );
-  }
-}
-
-class _DennyBlok extends StatelessWidget {
-  const _DennyBlok({
-    required this.datum,
-    required this.jazdy,
-    required this.onTap,
-  });
-
-  final String datum;
-  final List<Jazda> jazdy;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dennySucet = jazdy.fold<double>(
-      0,
-      (sucet, jazda) => sucet + jazda.kilometre,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(datum, style: theme.textTheme.titleMedium),
-              Text(
-                '${dennySucet.toStringAsFixed(1)} km',
-                style: theme.textTheme.labelLarge,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ...jazdy.map((jazda) => JazdaPolozka(jazda: jazda, onTap: onTap)),
         ],
       ),
     );

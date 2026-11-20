@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/jazda.dart';
 import '../../models/nastavenia_vozidla.dart';
 import '../../utils/decimalny_vstup.dart';
+import '../oblubene_miesta/nazov_miesta_dialog.dart';
 import 'widgets/jazda_polozka.dart';
 
 class DetailDnaPage extends StatefulWidget {
@@ -353,7 +354,7 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
     if (pridat == null || bod == null) return;
     final nazov = await showDialog<String>(
       context: context,
-      builder: (context) => _NazovMiestaDialog(navrh: navrh),
+      builder: (context) => NazovMiestaDialog(navrh: navrh),
     );
     if (nazov == null || nazov.trim().isEmpty || !mounted) return;
     final navigator = Navigator.of(context);
@@ -561,55 +562,6 @@ class _EditorJazdyDialogState extends State<_EditorJazdyDialog> {
           child: const Text('Zrušiť'),
         ),
         FilledButton(onPressed: _ulozit, child: const Text('Uložiť')),
-      ],
-    );
-  }
-}
-
-/// Dialóg na pomenovanie obľúbeného miesta (Domov, Práca…).
-class _NazovMiestaDialog extends StatefulWidget {
-  const _NazovMiestaDialog({required this.navrh});
-
-  final String navrh;
-
-  @override
-  State<_NazovMiestaDialog> createState() => _NazovMiestaDialogState();
-}
-
-class _NazovMiestaDialogState extends State<_NazovMiestaDialog> {
-  late final TextEditingController _nazov = TextEditingController(
-    text: widget.navrh,
-  );
-
-  @override
-  void dispose() {
-    _nazov.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Obľúbené miesto'),
-      content: TextField(
-        controller: _nazov,
-        autofocus: true,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          labelText: 'Názov',
-          hintText: 'napr. Domov, Práca, Sklad',
-        ),
-        onSubmitted: (hodnota) => Navigator.of(context).pop(hodnota),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Zrušiť'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_nazov.text),
-          child: const Text('Uložiť'),
-        ),
       ],
     );
   }
