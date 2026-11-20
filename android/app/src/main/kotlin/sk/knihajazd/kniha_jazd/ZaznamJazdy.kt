@@ -77,8 +77,25 @@ class ZaznamJazdy(
     /** Kedy Google naposledy hlásil „v aute“ (pri kontrole konca). */
     private var autoHlaseneMillis: Long? = null
     private var kandidatZaciatku: GpsBod? = null
+
+    /** Kandidát začiatku je miesto parkovania z geoplotu (nie GPS bod pred rozbehom). */
+    private var kandidatZGeoplotu = false
     private var vystupilMillis: Long? = null
     private var zaciatokZapisany = false
+
+    /** Dĺžka čakania na rozbeh, kým Google nehlási auto (pri geoplote kratšia). */
+    private var maxCakanieBezAutaMillis = MAX_CAKANIE_NA_ROZBEH_MILLIS
+
+    /**
+     * Pomalé body (pod 12 km/h) počas jazdy. Pripočítajú sa, až keď sa auto
+     * znova rozbehne. Ak jazda skončí, zahodia sa: po zaparkovaní je to chôdza
+     * od auta, ktorá do jazdy nepatrí (bez Googlu nepríde „vystúpil z auta“).
+     */
+    private val pomaleBody = mutableListOf<GpsBod>()
+
+    /** Posledný presný GPS bod (aj mimo jazdy), napr. na nový geoplot. */
+    var poslednyPresnyBod: GpsBod? = null
+        private set
 
     val jazdaZacala: Boolean get() = prvyBod != null
 
@@ -93,8 +110,14 @@ class ZaznamJazdy(
     /** Prišlo „vystúpil z auta“ a čaká sa, či sa auto znova rozbehne. */
     val cakaPoVystupeni: Boolean get() = vystupilMillis != null
 
-    /** Začiatok (alebo obnovenie) sledovania: odtiaľto sa ráta čakanie na rozbeh. */
-    fun spustit() {
+    /**
+     * Začiatok (alebo obnovenie) sledovania: odtiaľto sa ráta čakanie na rozbeh.
+     *
+     * @param maxCakanieBezAutaMillis ako dlho čakať na rozbeh, kým Google
+     *   nehlási auto. Po opustení geoplotu (možno len chôdza) stačí 10 min.
+     */
+    fun spustit(maxCakanieBezAutaMillis: Long = MAX_CAKANIE_NA_ROZBEH_MILLIS) {
+        this.maxCakanieBezAutaMillis = maxCakanieBezAutaMillis
         spusteneMillis = hodiny()
         autoHlaseneMillis = null
         uspornyRezim = false
@@ -105,6 +128,17 @@ class ZaznamJazdy(
 
     fun nastupil() {
         vystupilMillis = null
+    }
+
+    /**
+     * Telefón opustil geoplot okolo miesta parkovania: jazda (ak to bude jazda)
+     * začala tam. Bod má čas odhadnutého odchodu.
+     */
+    fun nastavitMiestoOdchodu(bod: GpsBod) {
+        if (prvyBod != null) return
+        kandidatZaciatku = bod
+        kandidatZGeoplotu = true
+        zapis("Miesto odchodu podľa geoplotu (miesto parkovania)")
     }
 
     fun vystupil() {
@@ -133,14 +167,24 @@ class ZaznamJazdy(
             0f
         }
         val novyBod = GpsBod(latitude, longitude, hodiny(), presnostMetre, rychlost)
+        poslednyPresnyBod = novyBod
 
         if (prvyBod == null) {
             val predtym = kandidatZaciatku
+            if (rychlost < RYCHLOST_START_METRE_ZA_SEKUNDU && kandidatZGeoplotu) {
+                // Po geoplote nevieme, kedy telefón okruh naozaj opustil, takže
+                // z posunu sa rýchlosť auta nedá odhadnúť (mohla to byť chôdza).
+                // Miesto parkovania ostáva začiatkom, kým nepríde bod nad 12 km/h.
+                return false
+            }
             if (rychlost < RYCHLOST_START_METRE_ZA_SEKUNDU) {
                 val posun = predtym?.let { vzdialenostMetre(it, novyBod) } ?: 0.0
+                val sekund = predtym?.let { (novyBod.casMillis - it.casMillis) / 1000.0 } ?: 0.0
+                // Posun musí byť rýchlosťou auta, nie chôdze (napr. odchod pešo z geoplotu).
                 val autoSaPohlo = predtym != null &&
                     novyBod.casMillis - predtym.casMillis in 0..MAX_VEK_ZACIATKU_MILLIS &&
-                    posun > MIN_POSUN_ROZBEHU_METRE + predtym.presnostMetre + novyBod.presnostMetre
+                    posun > MIN_POSUN_ROZBEHU_METRE + predtym.presnostMetre + novyBod.presnostMetre &&
+                    posun / maxOf(sekund, 1.0) >= RYCHLOST_START_METRE_ZA_SEKUNDU
                 if (!autoSaPohlo) {
                     // Zapamätáme si miesto pred rozbehom, aby jazde nechýbal úvodný úsek.
                     kandidatZaciatku = novyBod
@@ -160,9 +204,11 @@ class ZaznamJazdy(
                 return true
             }
             val kandidat = kandidatZaciatku
+            val maxVek = if (kandidatZGeoplotu) MAX_CAKANIE_PO_GEOPLOTE_MILLIS else MAX_VEK_ZACIATKU_MILLIS
             kandidatZaciatku = null
+            kandidatZGeoplotu = false
             if (kandidat != null &&
-                novyBod.casMillis - kandidat.casMillis in 0..MAX_VEK_ZACIATKU_MILLIS
+                novyBod.casMillis - kandidat.casMillis in 0..maxVek
             ) {
                 prvyBod = kandidat
                 poslednyBod = kandidat
@@ -177,8 +223,9 @@ class ZaznamJazdy(
             zapis("Jazda pokračuje (${kmh(rychlost)} km/h)")
         }
 
-        val predchadzajuci = poslednyBod
-        if (predchadzajuci != null) {
+        val posledny = poslednyBod
+        val predchadzajuci = pomaleBody.lastOrNull() ?: posledny
+        if (posledny != null && predchadzajuci != null) {
             val vzdialenost = vzdialenostMetre(predchadzajuci, novyBod)
             // Pri státí GPS „poskakuje“ v rámci svojej nepresnosti. Chybu má
             // každý z dvoch bodov, takže skok medzi nimi môže byť až súčtom
@@ -187,7 +234,19 @@ class ZaznamJazdy(
             val stoji = rychlost < RYCHLOST_POHYB_METRE_ZA_SEKUNDU &&
                 vzdialenost < novyBod.presnostMetre + predchadzajuci.presnostMetre
             if (stoji) return false
-            prejdeneMetre += vzdialenost
+            if (rychlost < RYCHLOST_START_METRE_ZA_SEKUNDU) {
+                pomaleBody += novyBod
+                return false
+            }
+            // Auto sa znova rozbehlo: pomalý úsek (zápcha, retardéry) patrí do jazdy.
+            var od: GpsBod = posledny
+            for (bod in pomaleBody) {
+                prejdeneMetre += vzdialenostMetre(od, bod)
+                od = bod
+                pocetBodov += 1
+            }
+            pomaleBody.clear()
+            prejdeneMetre += vzdialenostMetre(od, novyBod)
         } else {
             prvyBod = novyBod
         }
@@ -198,7 +257,7 @@ class ZaznamJazdy(
         }
         poslednyBod = novyBod
         pocetBodov += 1
-        if (rychlost >= RYCHLOST_POHYB_METRE_ZA_SEKUNDU) poslednyPohybMillis = novyBod.casMillis
+        poslednyPohybMillis = novyBod.casMillis
         return true
     }
 
@@ -224,6 +283,9 @@ class ZaznamJazdy(
         if (prvyBod == null) {
             val cakanie = teraz - spusteneMillis
             if (cakanie >= MAX_CAKANIE_NA_ROZBEH_MILLIS) return DovodKonca.ZIADNY_ROZBEH
+            if (cakanie >= maxCakanieBezAutaMillis && odHlaseniaAuta >= CAKANIE_NA_ROZBEH_MILLIS) {
+                return DovodKonca.ZIADNY_ROZBEH
+            }
             val usporny = minOf(cakanie, odHlaseniaAuta) >= CAKANIE_NA_ROZBEH_MILLIS
             if (usporny != uspornyRezim) {
                 uspornyRezim = usporny
@@ -255,8 +317,10 @@ class ZaznamJazdy(
         prejdeneMetre = 0.0
         poslednyPohybMillis = null
         kandidatZaciatku = null
+        kandidatZGeoplotu = false
         vystupilMillis = null
         zaciatokZapisany = false
+        pomaleBody.clear()
         uspornyRezim = false
         autoHlaseneMillis = null
         return jazda
@@ -276,6 +340,7 @@ class ZaznamJazdy(
         pocetBodov = stav.pocetBodov
         prejdeneMetre = stav.prejdeneMetre
         poslednyPohybMillis = stav.poslednyPohybMillis
+        pomaleBody.clear()
         zaciatokZapisany = prvyBod != null
         val posledny = poslednyBod ?: return null
         if (hodiny() - posledny.casMillis < CAS_ZASTAVENIA_MILLIS) return null
@@ -300,6 +365,9 @@ class ZaznamJazdy(
          * že sa medzi dvoma GPS bodmi pohlo, hoci pri oboch stojí (semafor).
          */
         const val MIN_POSUN_ROZBEHU_METRE = 150.0
+
+        /** Po opustení geoplotu: ak sa auto do 10 min nerozbehne, išlo asi o chôdzu. */
+        const val MAX_CAKANIE_PO_GEOPLOTE_MILLIS = 10 * 60 * 1_000L
 
         /** Posledná poloha pred rozbehom sa použije ako začiatok jazdy, ak je čerstvá. */
         const val MAX_VEK_ZACIATKU_MILLIS = 3 * 60 * 1_000L

@@ -64,7 +64,8 @@ object RegistraciaRozpoznavania {
                             .addOnSuccessListener {
                                 nastavitZapnute(aplikacia, true)
                                 Diagnostika.zapisat(aplikacia, "Rozpoznávanie jazdy zaregistrované")
-                                onHotovo(null)
+                                // Geoplot zachytí aj krátke jazdy, ktoré Google nerozpozná.
+                                Geoplot.obnovit(aplikacia) { onHotovo(null) }
                             }
                             .addOnFailureListener { chyba ->
                                 klient.removeActivityTransitionUpdates(pendingIntent(aplikacia))
@@ -98,6 +99,7 @@ object RegistraciaRozpoznavania {
         val klient = ActivityRecognition.getClient(aplikacia)
         nastavitZapnute(aplikacia, false)
         Diagnostika.zapisat(aplikacia, "Automatické sledovanie vypnuté používateľom")
+        Geoplot.zrusit(aplikacia)
         klient.removeActivityTransitionUpdates(pendingIntent(aplikacia))
             .addOnCompleteListener {
                 klient.removeActivityUpdates(aktualizaciaAktivityPendingIntent(aplikacia))

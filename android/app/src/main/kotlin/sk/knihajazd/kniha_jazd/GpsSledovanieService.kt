@@ -19,6 +19,8 @@ import com.google.android.gms.location.ActivityTransition
 import com.google.android.gms.location.ActivityTransitionResult
 import com.google.android.gms.location.DetectedActivity
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.Geofence
+import com.google.android.gms.location.GeofencingEvent
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -99,6 +101,7 @@ class GpsSledovanieService : Service() {
         when (intent?.action) {
             AKCIA_SPUSTIT -> spustitSledovanie()
             AKCIA_SPRACOVAT_AKTIVITU -> spracovatRozpoznanieAktivity(intent)
+            AKCIA_GEOPLOT -> spracovatGeoplot(intent)
             AKCIA_ZASTAVIT -> {
                 dokoncitJazdu()
                 ukonceneZamerne = true
@@ -173,6 +176,43 @@ class GpsSledovanieService : Service() {
         if (!sleduje) stopSelf()
     }
 
+    /**
+     * Telefón opustil geoplot okolo miesta parkovania. Google krátku jazdu po
+     * meste často nerozpozná, preto GPS overí, či ide o jazdu autom.
+     */
+    private fun spracovatGeoplot(intent: Intent) {
+        val udalost = GeofencingEvent.fromIntent(intent)
+        if (udalost == null || udalost.hasError()) {
+            Diagnostika.zapisat(this, "Geoplot: chybná udalosť (kód ${udalost?.errorCode})")
+            if (!sleduje) stopSelf()
+            return
+        }
+        if (udalost.geofenceTransition != Geofence.GEOFENCE_TRANSITION_EXIT) {
+            if (!sleduje) stopSelf()
+            return
+        }
+        if (sleduje) {
+            Diagnostika.zapisat(this, "Geoplot: telefón opustil miesto parkovania (sledovanie už beží)")
+            return
+        }
+        Diagnostika.zapisat(this, "Geoplot: telefón opustil miesto parkovania, overujem jazdu cez GPS")
+        val miesto = Geoplot.miestoParkovania(this)
+        spustitSledovanie(ZaznamJazdy.MAX_CAKANIE_PO_GEOPLOTE_MILLIS)
+        if (sleduje && miesto != null) {
+            // Jazda (ak to bude jazda) začala na mieste parkovania, približne
+            // minútu pred udalosťou (Google ju doručuje s oneskorením).
+            zaznam.nastavitMiestoOdchodu(
+                GpsBod(
+                    latitude = miesto.first,
+                    longitude = miesto.second,
+                    casMillis = System.currentTimeMillis() - Geoplot.ODHAD_ONESKORENIA_MILLIS,
+                    presnostMetre = 10f,
+                    rychlostMetreZaSekundu = 0f,
+                ),
+            )
+        }
+    }
+
     /** Istota „v aute“ z posledného odhadu pohybu, ak nie je starší ako 2 minúty. */
     private fun aktualnaIstotaAuta(): Int? {
         val preferencie = getSharedPreferences(
@@ -184,7 +224,9 @@ class GpsSledovanieService : Service() {
         return preferencie.getInt(RozpoznavanieAktivityReceiver.KLUC_ODHAD_AUTO_ISTOTA, 0)
     }
 
-    private fun spustitSledovanie() {
+    private fun spustitSledovanie(
+        maxCakanieBezAutaMillis: Long = ZaznamJazdy.MAX_CAKANIE_NA_ROZBEH_MILLIS,
+    ) {
         if (sleduje) return
         if (!maPovoleniePolohyNaPozadi(this)) {
             Diagnostika.zapisat(this, "Sledovanie nespustené: chýba presná poloha alebo poloha na pozadí")
@@ -194,7 +236,7 @@ class GpsSledovanieService : Service() {
             return
         }
         obnovitStavJazdy()
-        zaznam.spustit()
+        zaznam.spustit(maxCakanieBezAutaMillis)
 
         try {
             poziadatOPolohu(usporne = false)
@@ -260,7 +302,7 @@ class GpsSledovanieService : Service() {
         ulozitStavSledovania()
     }
 
-    private fun dokoncitJazdu() {
+    private fun dokoncitJazdu(): DokoncenaJazda? {
         val pocetBodov = zaznam.pocetBodov
         val jazda = zaznam.dokoncit()
         if (jazda != null) {
@@ -268,6 +310,7 @@ class GpsSledovanieService : Service() {
         } else if (pocetBodov > 0) {
             Diagnostika.zapisat(this, "Jazda zahodená: len $pocetBodov GPS bod(ov)")
         }
+        return jazda
     }
 
     private fun ulozitDokoncenuJazdu(jazda: DokoncenaJazda) {
@@ -280,7 +323,19 @@ class GpsSledovanieService : Service() {
     }
 
     private fun ukoncitSledovaniePreNecinnost() {
-        dokoncitJazdu()
+        val jazda = dokoncitJazdu()
+        // Nový geoplot: na konci jazdy (miesto parkovania), inak tam, kde
+        // telefón naposledy bol (napr. odišiel pešo); pri odchode odtiaľ sa
+        // sledovanie znova spustí.
+        val miesto = jazda?.koniec
+            ?: zaznam.poslednyPresnyBod?.takeIf {
+                System.currentTimeMillis() - it.casMillis < MAX_VEK_POLOHY_PRE_GEOPLOT_MILLIS
+            }
+        if (miesto != null) {
+            Geoplot.nastavit(this, miesto.latitude, miesto.longitude)
+        } else {
+            Geoplot.obnovit(this)
+        }
         ukonceneZamerne = true
         vymazatStavSledovania()
         getSharedPreferences(RozpoznavanieAktivityReceiver.PREFERENCIE, Context.MODE_PRIVATE)
@@ -450,6 +505,7 @@ class GpsSledovanieService : Service() {
         AKCIA_SPUSTIT -> "spustiť"
         AKCIA_ZASTAVIT -> "zastaviť"
         AKCIA_SPRACOVAT_AKTIVITU -> "udalosť auta"
+        AKCIA_GEOPLOT -> "geoplot"
         null -> "obnovenie po ukončení systémom"
         else -> akcia
     }
@@ -459,6 +515,7 @@ class GpsSledovanieService : Service() {
         const val AKCIA_ZASTAVIT = "sk.knihajazd.kniha_jazd.ZASTAVIT_GPS_SLEDOVANIE"
         const val AKCIA_SPRACOVAT_AKTIVITU = "sk.knihajazd.kniha_jazd.SPRACOVAT_AKTIVITU"
         const val AKCIA_JAZDA_DOKONCENA = "sk.knihajazd.kniha_jazd.GPS_JAZDA_DOKONCENA"
+        const val AKCIA_GEOPLOT = "sk.knihajazd.kniha_jazd.GEOPLOT"
         const val PREFERENCIE_DOKONCENE_JAZDY = "dokoncene_gps_jazdy"
         const val KLUC_DOKONCENE_JAZDY = "jazdy"
         private const val PREFERENCIE_STAV_SLEDOVANIA = "stav_gps_sledovania"
@@ -472,6 +529,7 @@ class GpsSledovanieService : Service() {
         private const val INTERVAL_GPS_MILLIS = 10_000L
         private const val INTERVAL_GPS_USPORNY_MILLIS = 60_000L
         private const val MAX_DOKONCENYCH_JAZD = 50
+        private const val MAX_VEK_POLOHY_PRE_GEOPLOT_MILLIS = 10 * 60 * 1_000L
 
         fun maRozpracovaneSledovanie(context: Context): Boolean =
             context.getSharedPreferences(PREFERENCIE_STAV_SLEDOVANIA, Context.MODE_PRIVATE)

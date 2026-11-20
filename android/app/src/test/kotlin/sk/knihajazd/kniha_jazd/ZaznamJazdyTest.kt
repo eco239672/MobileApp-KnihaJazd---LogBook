@@ -172,7 +172,7 @@ class ZaznamJazdyTest {
     }
 
     @Test
-    fun `pád telefónu v zápche - s hláseným autom jazda pokračuje, bez neho sa rozdelí`() {
+    fun `pád telefónu v zápche - s hláseným autom jazda pokračuje, bez neho geoplot zachytí pokračovanie`() {
         val trasa = SALA_BRATISLAVA
         val zapcha = 0.6 * trasa.dlzkaMetre
 
@@ -195,10 +195,10 @@ class ZaznamJazdyTest {
         assertEquals(1, sAutom.jazdy.size)
         assertKilometre(trasa.dlzkaMetre, sAutom.jazdy.single().prejdeneMetre, toleranciaPercent = 1.5)
 
-        // 2) Známe obmedzenie: Google po páde hlási „vystúpil“ bez odhadu auta
-        //    a auto stojí v zápche dlhšie ako 3 min. Jazda sa ukončí a ďalšia
-        //    začne, až keď Google znova hlási „nastúpil“ (tu po 2 min jazdy).
-        //    Kilometre medzi zápchou a týmto hlásením chýbajú.
+        // 2) Google po páde hlási „vystúpil“ bez odhadu auta a auto stojí
+        //    v zápche dlhšie ako 3 min: jazda sa ukončí a geoplot sa nastaví
+        //    v zápche. Keď sa kolóna pohne, geoplot spustí GPS skôr než Google
+        //    a druhá jazda začne presne v zápche, takže kilometre nechýbajú.
         val bezAuta = Simulacia("Pád telefónu v zápche, Google auto nehlási", LocalDateTime.of(2026, 11, 20, 7, 0))
         bezAuta.istotaAuta = 85
         bezAuta.nastupil()
@@ -218,7 +218,56 @@ class ZaznamJazdyTest {
         bezAuta.vypisat()
         assertEquals("Bez hláseného auta sa jazda rozdelí na dve", 2, bezAuta.jazdy.size)
         assertKilometre(zapcha, bezAuta.jazdy[0].prejdeneMetre, toleranciaPercent = 1.5)
-        assertKilometre(trasa.dlzkaMetre - znovaZachytene, bezAuta.jazdy[1].prejdeneMetre, toleranciaPercent = 2.0)
+        assertKilometre(trasa.dlzkaMetre - zapcha, bezAuta.jazdy[1].prejdeneMetre, toleranciaPercent = 2.0)
+        assertBlizko("druhá jazda začína v zápche", trasa.poloha(zapcha), bezAuta.jazdy[1].zaciatok, maxMetrov = 40.0)
+        assertTrue("Google prišiel až neskôr", znovaZachytene > zapcha)
+    }
+
+    @Test
+    fun `krátka jazda po Veči bez Googlu - spustí ju geoplot`() {
+        val sim = Simulacia("Veča: Komenského → Nitrianska, Google auto nerozpozná", LocalDateTime.of(2026, 11, 20, 9, 30))
+        val trasa = VECA_KOMENSKEHO_NITRIANSKA
+        sim.geoplot = trasa.poloha(0.0) // auto parkuje pri dome od včera
+        sim.oneskorenieGeoplotuSekund = 90
+        sim.istotaAuta = 10 // Google hlási len „neznáme 40 %, v aute 10 %“
+        sim.cakat(minuty = 2, poloha = trasa.poloha(0.0)) // nastúpiš, naštartuješ
+        val odjazd = sim.teraz
+        val polovica = trasa.dlzkaMetre / 2
+        sim.jazditUsek(trasa, 0.0, polovica, kmh = 35.0)
+        sim.cakat(minuty = 1, poloha = trasa.poloha(polovica)) // križovatka
+        sim.jazditUsek(trasa, polovica, trasa.dlzkaMetre, kmh = 30.0)
+        val prichod = sim.teraz
+        sim.ist(pesoMinut = 3, od = trasa.poloha(trasa.dlzkaMetre))
+        sim.cakat(minuty = 25, poloha = null) // v budove, bez GPS
+
+        sim.vypisat()
+        assertEquals("Krátka jazda sa má zaznamenať", 1, sim.jazdy.size)
+        assertEquals(listOf(DovodKonca.BEZ_POHYBU), sim.dovody)
+        val jazda = sim.jazdy.single()
+        assertBlizko("začiatok pri dome na Komenského", trasa.poloha(0.0), jazda.zaciatok, maxMetrov = 30.0)
+        assertBlizko("koniec na Nitrianskej, nie pri chôdzi", trasa.poloha(trasa.dlzkaMetre), jazda.koniec, maxMetrov = 30.0)
+        assertCasPriblizne("začiatok jazdy", odjazd, jazda.zaciatok.casMillis, toleranciaSekund = 150)
+        assertCasPriblizne("koniec jazdy", prichod, jazda.koniec.casMillis, toleranciaSekund = 20)
+        assertTrue(
+            "Kilometre: trasa ${"%.2f".format(trasa.dlzkaMetre / 1000)} km, zaznamenané ${"%.2f".format(jazda.prejdeneMetre / 1000)} km",
+            abs(jazda.prejdeneMetre - trasa.dlzkaMetre) <= 120.0,
+        )
+        assertTrue("Po jazde je nový geoplot na mieste parkovania", sim.geoplot != null)
+    }
+
+    @Test
+    fun `odchod pešo z domu - geoplot spustí GPS, ale jazda nevznikne`() {
+        val sim = Simulacia("Odchod pešo z domu (opustí geoplot)", LocalDateTime.of(2026, 11, 20, 12, 0))
+        val domov = VECA_KOMENSKEHO_NITRIANSKA.poloha(0.0)
+        sim.geoplot = domov
+        sim.istotaAuta = null
+        sim.ist(pesoMinut = 15, od = domov)
+        sim.cakat(minuty = 5, poloha = null)
+
+        sim.vypisat()
+        assertTrue("Chôdza nesmie vytvoriť jazdu", sim.jazdy.isEmpty())
+        assertEquals("GPS sa po 10 min bez rozbehu vypne", listOf(DovodKonca.ZIADNY_ROZBEH), sim.dovody)
+        assertTrue("Nový geoplot je tam, kde telefón skončil", sim.geoplot != null && vzdialenost(sim.geoplot!!, domov) > 150)
     }
 
     @Test
@@ -335,9 +384,13 @@ class ZaznamJazdyTest {
         val falosneVystupenia: List<Double>,
         val vystupeniaBezOdhadu: List<Double>,
         val podielNepresnych: Double,
+        /** Jazdu spustí geoplot (Google auto vôbec nerozpozná, napr. krátka jazda). */
+        val startCezGeoplot: Boolean,
+        val oneskorenieGeoplotuSekund: Int,
     ) {
         val popis: String
             get() = buildList {
+                if (startCezGeoplot) add("štart cez geoplot (oneskorenie $oneskorenieGeoplotuSekund s)")
                 add("čakanie $cakanieMinut min (Google ${istotaPriCakani?.let { "$it %" } ?: "-"})")
                 add("jazda Google ${istotaPocasJazdy?.let { "$it %" } ?: "-"}")
                 add("${rychlostMimoMesta.toInt()} km/h")
@@ -355,7 +408,8 @@ class ZaznamJazdyTest {
             fun nahodny(odkial: Obec, kam: Obec, n: Random): PlanJazdy {
                 val trasa = trasaSoZakrutami(odkial.poloha, kam.poloha, n)
                 val dlzka = trasa.dlzkaMetre
-                val istotaPriCakani = listOf(70, 70, 10, null)[n.nextInt(4)]
+                val startCezGeoplot = n.nextInt(10) < 3
+                val istotaPriCakani = if (startCezGeoplot) listOf(10, null)[n.nextInt(2)] else listOf(70, 70, 10, null)[n.nextInt(4)]
                 val istotaPocasJazdy = listOf(85, 85, 60, 10, null)[n.nextInt(5)]
                 val rychlost = listOf(70.0, 90.0, 110.0, 130.0)[n.nextInt(4)]
 
@@ -382,6 +436,11 @@ class ZaznamJazdyTest {
                         zastavky += Zastavka(it, 20 + n.nextInt(100), istotaPocasJazdy, "semafor")
                     }
                 }
+                // Pri štarte cez geoplot sa sledovanie spustí až po chvíli jazdy;
+                // zápchy a udalosti od Googlu dáme až za tento úsek (semafory môžu byť).
+                // Známe obmedzenie: zápcha dlhšia ako 30 min hneď za geoplotom
+                // ukončí čakanie na rozbeh a úvodný úsek jazdy sa stratí.
+                if (startCezGeoplot) obsadene += 0.0..2_500.0
                 // Zápchy: s hláseným autom až 40 min, bez neho do 17 min (po 20 min sa jazda ukončí).
                 if (dlzka > 10_000) {
                     repeat(n.nextInt(3)) {
@@ -422,6 +481,8 @@ class ZaznamJazdyTest {
                     falosneVystupenia = falosne.sorted(),
                     vystupeniaBezOdhadu = bezOdhadu.sorted(),
                     podielNepresnych = listOf(0.0, 0.05, 0.1)[n.nextInt(3)],
+                    startCezGeoplot = startCezGeoplot,
+                    oneskorenieGeoplotuSekund = 30 + 10 * n.nextInt(10),
                 )
             }
 
@@ -514,7 +575,32 @@ class ZaznamJazdyTest {
                 "${cas(jazda.zaciatok.casMillis)} – ${cas(jazda.koniec.casMillis)}]"
         }
 
-        private fun spustitSledovanie() {
+        /** Stred geoplotu (miesto parkovania); null = geoplot nie je nastavený. */
+        var geoplot: Pair<Double, Double>? = null
+
+        /** Za koľko sekúnd po opustení okruhu Google pošle udalosť geoplotu. */
+        var oneskorenieGeoplotuSekund = 60
+        private var mimoOkruhuOd: Long? = null
+
+        /** To isté ako GpsSledovanieService pri udalosti „opustil geoplot“. */
+        private fun opustilGeoplot() {
+            val stred = geoplot ?: return
+            geoplot = null
+            mimoOkruhuOd = null
+            zapisy += "${cas(teraz)}  Geoplot: telefón opustil miesto parkovania"
+            if (sleduje) return
+            spustitSledovanie(ZaznamJazdy.MAX_CAKANIE_PO_GEOPLOTE_MILLIS)
+            zaznam.nastavitMiestoOdchodu(GpsBod(stred.first, stred.second, teraz - 60_000, 10f, 0f))
+        }
+
+        /** Po skončení sledovania služba nastaví geoplot na koniec jazdy alebo poslednú polohu. */
+        private fun nastavitGeoplotPoSledovani(jazda: DokoncenaJazda?) {
+            val bod = jazda?.koniec ?: zaznam.poslednyPresnyBod ?: return
+            geoplot = Pair(bod.latitude, bod.longitude)
+            mimoOkruhuOd = null
+        }
+
+        private fun spustitSledovanie(maxCakanieBezAuta: Long = ZaznamJazdy.MAX_CAKANIE_NA_ROZBEH_MILLIS) {
             if (sleduje) return
             val stav = ulozenyStav
             if (stav != null) {
@@ -524,7 +610,7 @@ class ZaznamJazdyTest {
                 zaznam.obnovit(stav)?.let(::ulozitJazdu)
                 zapisy += "${cas(teraz)}  [sledovanie obnovené po reštarte]"
             }
-            zaznam.spustit()
+            zaznam.spustit(maxCakanieBezAuta)
             sleduje = true
             odGps = 0
             zapisy += "${cas(teraz)}  [GPS sledovanie spustené]"
@@ -556,6 +642,15 @@ class ZaznamJazdyTest {
         /** 10 sekúnd: GPS bod (ak je signál) a každých 30 s kontrola konca, ako v telefóne. */
         fun krok(poloha: Pair<Double, Double>?, kmh: Double, presnost: Float) {
             teraz += 10_000
+            val stred = geoplot
+            if (!sleduje && stred != null && poloha != null) {
+                if (vzdialenost(stred, poloha) <= POLOMER_GEOPLOTU) {
+                    mimoOkruhuOd = null
+                } else {
+                    val od = mimoOkruhuOd ?: teraz.also { mimoOkruhuOd = it }
+                    if (teraz - od >= oneskorenieGeoplotuSekund * 1_000L) opustilGeoplot()
+                }
+            }
             odGps += 10_000
             // V úspornom režime služba žiada GPS raz za minútu, inak každých 10 s.
             val intervalGps = if (zaznam.uspornyRezim) 60_000L else 10_000L
@@ -572,7 +667,9 @@ class ZaznamJazdyTest {
                 odKontroly = 0
                 val dovod = zaznam.skontrolovat(istotaAuta) ?: return
                 dovody += dovod
-                zaznam.dokoncit()?.let(::ulozitJazdu)
+                val jazda = zaznam.dokoncit()
+                jazda?.let(::ulozitJazdu)
+                nastavitGeoplotPoSledovani(jazda)
                 sleduje = false
                 zapisy += "${cas(teraz)}  [koniec sledovania: $dovod]"
             }
@@ -673,12 +770,18 @@ class ZaznamJazdyTest {
             val trasa = plan.trasa
             val dlzka = trasa.dlzkaMetre
             istotaAuta = plan.istotaPriCakani
-            nastupil()
+            if (plan.startCezGeoplot) {
+                // Auto stojí v geoplote; Google jazdu nerozpozná, GPS nebeží.
+                geoplot = trasa.poloha(0.0)
+                oneskorenieGeoplotuSekund = plan.oneskorenieGeoplotuSekund
+            } else {
+                nastupil()
+            }
             repeat(plan.cakanieMinut * 6) {
                 krok(trasa.poloha(0.0), kmh = 0.0, presnost = 12f)
                 if (usporne) usporneBolo = true
             }
-            if (!sleduje) return "Sledovanie skončilo počas čakania na odjazd (${dovody.joinToString()})"
+            if (!plan.startCezGeoplot && !sleduje) return "Sledovanie skončilo počas čakania na odjazd (${dovody.joinToString()})"
             val odjazd = teraz
 
             var prejdene = 0.0
@@ -745,20 +848,30 @@ class ZaznamJazdyTest {
             }
             val prichod = teraz
 
-            istotaAuta = 5
-            vystupil()
-            ist(pesoMinut = 2, od = trasa.poloha(dlzka))
-            cakat(minuty = 5, poloha = null)
+            if (plan.startCezGeoplot) {
+                // Bez Googlu nepríde „vystúpil“: chôdza od auta sa nesmie zarátať
+                // a jazda sa ukončí po 20 min bez pohybu auta.
+                istotaAuta = null
+                ist(pesoMinut = 2, od = trasa.poloha(dlzka))
+                cakat(minuty = 22, poloha = null)
+            } else {
+                istotaAuta = 5
+                vystupil()
+                ist(pesoMinut = 2, od = trasa.poloha(dlzka))
+                cakat(minuty = 5, poloha = null)
+            }
 
             if (jazdy.size != 1) return "Očakávaná 1 jazda, vzniklo ${jazdy.size} (dôvody konca: ${dovody.joinToString()})"
-            if (dovody != listOf(DovodKonca.VYSTUPIL)) return "Nesprávny dôvod konca: ${dovody.joinToString()}"
+            val ocakavanyDovod = if (plan.startCezGeoplot) DovodKonca.BEZ_POHYBU else DovodKonca.VYSTUPIL
+            if (dovody != listOf(ocakavanyDovod)) return "Nesprávny dôvod konca: ${dovody.joinToString()}"
             val jazda = jazdy.single()
             val tolerancia = maxOf(0.015 * dlzka, 150.0)
             val ocakavane = dlzka - strataPrerusenim
             if (abs(jazda.prejdeneMetre - ocakavane) > tolerancia) {
                 return "Kilometre: očakávané ${"%.2f".format(ocakavane / 1000)} km, zaznamenané ${"%.2f".format(jazda.prejdeneMetre / 1000)} km"
             }
-            if (abs(jazda.zaciatok.casMillis - odjazd) > 70_000) return "Začiatok ${cas(jazda.zaciatok.casMillis)}, odjazd bol ${cas(odjazd)}"
+            val toleranciaZaciatku = if (plan.startCezGeoplot) 150_000 else 70_000
+            if (abs(jazda.zaciatok.casMillis - odjazd) > toleranciaZaciatku) return "Začiatok ${cas(jazda.zaciatok.casMillis)}, odjazd bol ${cas(odjazd)}"
             if (abs(jazda.koniec.casMillis - prichod) > 20_000) return "Koniec ${cas(jazda.koniec.casMillis)}, príchod bol ${cas(prichod)}"
             val odStartu = vzdialenost(trasa.poloha(0.0), Pair(jazda.zaciatok.latitude, jazda.zaciatok.longitude))
             if (odStartu > 30) return "Začiatok ${"%.0f".format(odStartu)} m od miesta odjazdu"
@@ -797,6 +910,18 @@ class ZaznamJazdyTest {
 
     companion object {
         private val ZONA = ZoneId.of("Europe/Bratislava")
+        private const val POLOMER_GEOPLOTU = 150.0
+
+        /** Šaľa-Veča: Komenského → Nitrianska (zjednodušená trasa po uliciach). */
+        private val VECA_KOMENSKEHO_NITRIANSKA = Trasa(
+            listOf(
+                48.14180 to 17.88530,
+                48.14300 to 17.88700,
+                48.14320 to 17.88950,
+                48.14520 to 17.89020,
+                48.14600 to 17.89280,
+            ),
+        )
         private val PRIEBEH = mutableListOf<String>()
         /** Rovnaké semienko = vždy rovnaké jazdy. Iné jazdy: zmeň 2026 na iné číslo. */
         private val SEMIENKO_NAHODNYCH_JAZD = System.getProperty("semienko")?.toLongOrNull() ?: 2026L
