@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.ActivityTransition
 import com.google.android.gms.location.ActivityTransitionResult
@@ -129,6 +130,17 @@ class GpsSledovanieService : Service() {
         for (udalost in vysledok.transitionEvents) {
             if (udalost.activityType != DetectedActivity.IN_VEHICLE) continue
             val vAute = udalost.transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER
+            // Pri každej registrácii (napr. otvorenie aplikácie) Google zopakuje
+            // posledný prechod, aj hodinu starý. Overené na Ulefone: starý
+            // „nastúpil“ zrušil skutočný príchod a dve jazdy sa zliali do jednej.
+            val vekMillis = (SystemClock.elapsedRealtimeNanos() - udalost.elapsedRealTimeNanos) / 1_000_000
+            if (vekMillis > MAX_VEK_PRECHODU_MILLIS) {
+                Diagnostika.zapisat(
+                    this,
+                    "Starý prechod ignorovaný (${if (vAute) "nastúpil" else "vystúpil"}, pred ${vekMillis / 60_000} min)",
+                )
+                continue
+            }
             Diagnostika.zapisat(
                 this,
                 "Prechod: ${if (vAute) "nastúpil do auta" else "vystúpil z auta"}",
@@ -525,6 +537,7 @@ class GpsSledovanieService : Service() {
         private const val KANAL_NOTIFIKACIE = "gps_sledovanie_jazd"
         private const val ID_NOTIFIKACIE = 742
         private const val MAX_VEK_ODHADU_MILLIS = 2 * 60 * 1_000L
+        private const val MAX_VEK_PRECHODU_MILLIS = 2 * 60 * 1_000L
         private const val INTERVAL_KONTROLY_MILLIS = 30_000L
         private const val INTERVAL_GPS_MILLIS = 10_000L
         private const val INTERVAL_GPS_USPORNY_MILLIS = 60_000L
